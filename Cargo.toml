@@ -1,0 +1,28 @@
+[package]
+name = "minimal-plonk"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ark-ff = "0.4"
+ark-ec = "0.4"
+ark-poly = "0.4"
+ark-poly-commit = "0.4"
+ark-bn254 = { version = "0.4", optional = true }
+ark-bls12-381 = { version = "0.4", optional = true }
+ark-std = "0.4"
+ark-serialize = { version = "0.4", features = ["derive"] }
+
+blake2 = "0.10"
+merlin = "3"
+rand = "0.8"
+sha2 = "0.10"
+thiserror = "1"
+
+[features]
+# 默认曲线：BN254（与 memory-bank/tech-stack.md 对齐）
+default = ["bn254"]
+
+# 曲线切换：只启用其中一个 feature。
+bn254 = ["dep:ark-bn254"]
+bls12_381 = ["dep:ark-bls12-381"]

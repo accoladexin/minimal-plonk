@@ -1,0 +1,10 @@
+//! Minimal-Plonk：最小但完整的 Plonk 证明系统（Rust + arkworks）
+//!
+//! 当前处于 Phase 0：工程骨架阶段。
+
+pub mod curve;
+pub mod error;
+pub mod prelude;
+pub mod transcript;
+pub mod types;
+pub mod validate;
