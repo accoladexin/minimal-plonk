@@ -10,7 +10,7 @@ use core::fmt;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlonkError {
     /// 输入不满足最基本前置条件时使用。
-    InvalidInput(&'static str),
+    InvalidInput(&'static str), // 是个元组变体，携带一个静态字符串作为错误信息。
 }
 
 impl fmt::Display for PlonkError {

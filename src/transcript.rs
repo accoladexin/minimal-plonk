@@ -22,11 +22,13 @@ const TAG_COMMITMENT: u8 = 2;
 const TAG_CHALLENGE: u8 = 3;
 
 /// 最小版 transcript。
+/// 后续就是state+challenge_counter的哈希结果来生成挑战值
+/// 跟进hash来选择hash算法
 #[derive(Clone, Debug)]
 pub struct Transcript {
-    hash: TranscriptHash,
-    state: Vec<u8>,
-    challenge_counter: u64,
+    hash: TranscriptHash,   // 选择使用哪种哈希算法 (Blake2b 或 SHA256)
+    state: Vec<u8>,         // 核心：所有历史信息的“汇总字节流”
+    challenge_counter: u64, // 计数器，确保生成的挑战值序列是唯一的
 }
 
 impl Transcript {
@@ -69,15 +71,14 @@ impl Transcript {
 
     /// 统一写入一帧消息，避免不同类型消息的边界混淆。
     fn append_frame(&mut self, tag: u8, label: &[u8], payload: &[u8]) {
-        self.state.push(tag);
+        self.state.push(tag); // 写入类型标签 (Bytes, Scalar, 还是 Commitment)
         self.state
-            .extend_from_slice(&(label.len() as u64).to_le_bytes());
-        self.state.extend_from_slice(label);
+            .extend_from_slice(&(label.len() as u64).to_le_bytes()); // 写入标签长度
+        self.state.extend_from_slice(label); // 写入标签内容
         self.state
-            .extend_from_slice(&(payload.len() as u64).to_le_bytes());
-        self.state.extend_from_slice(payload);
+            .extend_from_slice(&(payload.len() as u64).to_le_bytes()); // 写入数据长度
+        self.state.extend_from_slice(payload); // 写入数据内容
     }
-
     /// 对当前状态做一次哈希，并把 label 与 challenge 计数器也纳入输入。
     fn hash_current_state(&self, label: &[u8]) -> Vec<u8> {
         let mut preimage = Vec::with_capacity(self.state.len() + label.len() + 16);

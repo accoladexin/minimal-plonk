@@ -38,9 +38,9 @@ impl Default for TranscriptHash {
 /// Domain 的基础参数。
 #[derive(Clone, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct DomainParams {
-    pub size: u64,
-    pub log_size: u32,
-    pub generator: Fr,
+    pub size: u64,     // 2^n，即电路中“行”的数量。
+    pub log_size: u32, // n，即 size 的对数。
+    pub generator: Fr, // 单位原根 ω。
 }
 
 impl DomainParams {
@@ -57,9 +57,9 @@ impl DomainParams {
 /// Plonk 的全局配置。
 #[derive(Clone, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct PlonkConfig {
-    pub max_degree: u64,
-    pub num_wire_columns: u32,
-    pub transcript_hash_id: u8,
+    pub max_degree: u64,        // 这个电路支持的最大多项式阶数。
+    pub num_wire_columns: u32,  // 寄存器列数（标准 Plonk 通常是 3 列：a, b, c）。
+    pub transcript_hash_id: u8, // 用哪种哈希生成挑战值（0 代表 Blake2b）。
 }
 
 impl PlonkConfig {
@@ -68,7 +68,7 @@ impl PlonkConfig {
         Self {
             max_degree,
             num_wire_columns,
-            transcript_hash_id: transcript_hash.as_byte(),
+            transcript_hash_id: transcript_hash.as_byte(), // 这是自定义的一个函数
         }
     }
 }
@@ -96,11 +96,17 @@ impl Commitment {
 /// 证明对象的占位结构。
 #[derive(Clone, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct ProofSkeleton {
+    // 1. a(x), b(x), c(x) 多项式的承诺
     pub wire_commitments: Vec<Commitment>,
+    // 2. 商多项式 t(x) 的承诺（确保约束成立的核心）
     pub quotient_commitment: Option<Commitment>,
+    // 3. 置换多项式 z(x) 的承诺（确保复制约束/连线正确）
     pub grand_product_commitment: Option<Commitment>,
+    // 4. KZG 打开证明（证明多项式在某个点的值是对的）
     pub opening_proof: Option<Commitment>,
+    // 5. 公开输入（电路里大家都能看到的数）
     pub public_inputs: Vec<Fr>,
+    // 6. 各个多项式在挑战点 ζ 处的求值结果
     pub evaluations: Vec<Fr>,
 }
 
@@ -117,4 +123,3 @@ impl ProofSkeleton {
         }
     }
 }
-

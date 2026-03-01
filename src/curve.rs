@@ -25,7 +25,13 @@ pub type Curve = ark_bls12_381::Bls12_381;
 /// 标量域（电路约束、挑战值等都在这个域里）。
 pub type Fr = <Curve as Pairing>::ScalarField;
 
+// 关键转换 (`from_projective`)**：
+
+//- **Projective (G1)**：内部计算用的坐标 $(x, y, z)$，计算快但费空间。
+//- **Affine (G1Affine)**：存储和传输用的坐标 $(x, y)$，结构紧凑。
+// - **作用**：Prover 算完之后，会把结果“压缩”成 Affine 格式放进这个结构体。
 /// G1 群（KZG 承诺通常在 G1 上做）。
+/// Curve as Pairing 表明Cureve实现了Pairing trait，G1是这个trait中的一个关联类型。
 pub type G1 = <Curve as Pairing>::G1;
 
 /// G1 的仿射表示，适合做稳定序列化与承诺存储。

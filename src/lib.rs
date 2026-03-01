@@ -3,6 +3,7 @@
 //! 当前处于 Phase 0：工程骨架阶段。
 
 pub mod curve;
+pub mod domain;
 pub mod error;
 pub mod prelude;
 pub mod transcript;
