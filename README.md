@@ -91,20 +91,22 @@ cargo bench
 
 #### [Implemented]
 - `src/curve.rs`
+- `src/domain/`
+- `src/cs/`
+- `src/mimc/`
 - `src/error.rs`
 - `src/prelude.rs`
 - `src/transcript.rs`
 - `src/types.rs`
 - `src/validate.rs`
+- `examples/mimc.rs`
 
 #### [Planned]
-- `src/cs/`
 - `src/permutation/`
 - `src/quotient/`
 - `src/kzg/`
 - `src/prover.rs`
 - `src/verifier.rs`
-- `examples/`
 - `benches/`
 
 ## 参考资料
