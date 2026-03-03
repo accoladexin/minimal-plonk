@@ -4,6 +4,7 @@
 //! - 单行 gate 的字段与约束计算
 //! - 电路行集合管理（add_gate / pad_to_domain / 约束检查）
 
+pub mod builtin_gates;
 pub mod circuit;
 pub mod gate;
 

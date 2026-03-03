@@ -94,6 +94,7 @@ cargo bench
 - `src/domain/`
 - `src/cs/`
 - `src/mimc/`
+- `src/witness/`
 - `src/error.rs`
 - `src/prelude.rs`
 - `src/transcript.rs`

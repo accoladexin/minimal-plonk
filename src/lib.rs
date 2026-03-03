@@ -11,3 +11,4 @@ pub mod prelude;
 pub mod transcript;
 pub mod types;
 pub mod validate;
+pub mod witness;
