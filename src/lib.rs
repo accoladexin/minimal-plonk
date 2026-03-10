@@ -7,6 +7,7 @@ pub mod cs;
 pub mod domain;
 pub mod error;
 pub mod mimc;
+pub mod permutation;
 pub mod prelude;
 pub mod transcript;
 pub mod types;

@@ -34,7 +34,8 @@ fn tampered_trace_breaks_gate_constraints() {
     let mut trace = mimc_feistel_trace(Fr::from(3u64), &constants);
     trace[2].cubed += Fr::from(1u64);
 
-    let mut circuit = build_mimc_feistel_circuit_from_trace(&trace);
+    let mut circuit =
+        build_mimc_feistel_circuit_from_trace(&trace).expect("circuit should build");
     circuit.pad_to_domain();
 
     assert!(!circuit.are_all_gates_satisfied());
@@ -54,7 +55,8 @@ fn broken_cross_round_link_is_detected() {
     recompute_round_in_place(&mut trace[3]);
 
     // 构建电路
-    let mut circuit = build_mimc_feistel_circuit_from_trace(&trace);
+    let mut circuit =
+        build_mimc_feistel_circuit_from_trace(&trace).expect("circuit should build");
     // 填充到2^n
     circuit.pad_to_domain();
 

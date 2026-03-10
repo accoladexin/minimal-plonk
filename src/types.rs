@@ -9,7 +9,13 @@
 use ark_ec::CurveGroup;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 
-use crate::curve::{Fr, G1, G1Affine};
+use crate::{
+    cs::SelectorColumns,
+    curve::{Fr, G1, G1Affine},
+    error::{PlonkError, Result as PlonkResult},
+    permutation::{GrandProductEvaluations, SigmaMapping},
+    witness::WitnessColumns,
+};
 
 /// Transcript 可选哈希。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -121,5 +127,59 @@ impl ProofSkeleton {
             public_inputs: Vec::new(),
             evaluations: Vec::new(),
         }
+    }
+}
+
+/// Step 4.3 为 Step 5 准备的最小同域输入上下文。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QuotientInputs {
+    pub domain_size: usize,
+    pub witness_columns: WitnessColumns,
+    pub selector_columns: SelectorColumns,
+    pub sigma_mapping: SigmaMapping,
+    pub grand_product_evaluations: GrandProductEvaluations,
+}
+
+impl QuotientInputs {
+    /// 功能说明：把 Step 5 需要的散落输入收口到一个对象里，并校验同域一致性。
+    /// 输入：witness、selector、sigma、grand product。
+    /// 输出：合法时返回 `QuotientInputs`。
+    /// 示例：当四者都对应同一个 size-n domain 时构造成功。
+    pub fn new(
+        witness_columns: WitnessColumns,
+        selector_columns: SelectorColumns,
+        sigma_mapping: SigmaMapping,
+        grand_product_evaluations: GrandProductEvaluations,
+    ) -> PlonkResult<Self> {
+        let domain_size = witness_columns.domain_size();
+
+        if selector_columns.domain_size() != domain_size {
+            return Err(PlonkError::InconsistentLength(
+                "selector domain_size must match witness domain_size",
+            ));
+        }
+        if sigma_mapping.domain_size() != domain_size {
+            return Err(PlonkError::InconsistentLength(
+                "sigma domain_size must match witness domain_size",
+            ));
+        }
+        if grand_product_evaluations.domain_size != domain_size {
+            return Err(PlonkError::InconsistentLength(
+                "grand product domain_size must match witness domain_size",
+            ));
+        }
+        if grand_product_evaluations.grand_product_evaluations.len() != domain_size + 1 {
+            return Err(PlonkError::InconsistentLength(
+                "grand product evaluations length must equal domain_size + 1",
+            ));
+        }
+
+        Ok(Self {
+            domain_size,
+            witness_columns,
+            selector_columns,
+            sigma_mapping,
+            grand_product_evaluations,
+        })
     }
 }

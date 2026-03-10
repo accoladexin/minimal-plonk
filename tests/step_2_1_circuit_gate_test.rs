@@ -22,7 +22,9 @@ fn valid_gate_witness_passes_constraint_check() {
     let q_m = Fr::from(1u64);
     let q_c = Fr::from(0u64);
 
-    circuit.add_gate(wire_a, wire_b, wire_c, q_l, q_r, q_o, q_m, q_c);
+    circuit
+        .add_gate(wire_a, wire_b, wire_c, q_l, q_r, q_o, q_m, q_c)
+        .expect("adding gate should succeed");
 
     assert_eq!(
         circuit
@@ -54,7 +56,9 @@ fn invalid_gate_witness_fails_constraint_check() {
     let q_m = Fr::from(1u64);
     let q_c = Fr::from(0u64);
 
-    circuit.add_gate(wire_a, wire_b, wire_c, q_l, q_r, q_o, q_m, q_c);
+    circuit
+        .add_gate(wire_a, wire_b, wire_c, q_l, q_r, q_o, q_m, q_c)
+        .expect("adding gate should succeed");
 
     assert_ne!(
         circuit
@@ -78,16 +82,18 @@ fn pad_to_domain_pads_to_next_power_of_two_with_zero_rows() {
     let mut circuit = Circuit::new();
 
     for value in [1u64, 2u64, 3u64] {
-        circuit.add_gate(
-            Fr::from(value),
-            Fr::from(0u64),
-            Fr::from(0u64),
-            Fr::from(0u64),
-            Fr::from(0u64),
-            Fr::from(0u64),
-            Fr::from(0u64),
-            Fr::from(0u64),
-        );
+        circuit
+            .add_gate(
+                Fr::from(value),
+                Fr::from(0u64),
+                Fr::from(0u64),
+                Fr::from(0u64),
+                Fr::from(0u64),
+                Fr::from(0u64),
+                Fr::from(0u64),
+                Fr::from(0u64),
+            )
+            .expect("adding gate should succeed");
     }
 
     assert_eq!(circuit.num_rows(), 3);
@@ -118,4 +124,38 @@ fn circuit_rejects_out_of_range_row_index() {
     assert!(circuit.gate_constraint_value(0).is_err());
     assert!(circuit.is_gate_satisfied(0).is_err());
     assert!(circuit.row(0).is_err());
+}
+
+/// pad_to_domain 之后继续 add_gate 必须失败，避免中间 padding 与后续行混在一起。
+#[test]
+fn add_gate_fails_after_pad_to_domain() {
+    let mut circuit = Circuit::new();
+    circuit
+        .add_gate(
+            Fr::from(1u64),
+            Fr::from(2u64),
+            Fr::from(3u64),
+            Fr::from(0u64),
+            Fr::from(0u64),
+            Fr::from(0u64),
+            Fr::from(0u64),
+            Fr::from(0u64),
+        )
+        .expect("adding gate before padding should succeed");
+
+    circuit.pad_to_domain();
+
+    let result = circuit.add_gate(
+        Fr::from(4u64),
+        Fr::from(5u64),
+        Fr::from(6u64),
+        Fr::from(0u64),
+        Fr::from(0u64),
+        Fr::from(0u64),
+        Fr::from(0u64),
+        Fr::from(0u64),
+    );
+    assert!(result.is_err());
+    assert!(circuit.is_frozen());
+    assert_eq!(circuit.num_rows(), 1);
 }

@@ -16,36 +16,42 @@ use minimal_plonk::{
 fn build_padded_sample_circuit() -> Circuit {
     let mut circuit = Circuit::new();
 
-    circuit.add_gate(
-        Fr::from(11u64),
-        Fr::from(101u64),
-        Fr::from(1001u64),
-        Fr::from(0u64),
-        Fr::from(0u64),
-        Fr::from(0u64),
-        Fr::from(0u64),
-        Fr::from(0u64),
-    );
-    circuit.add_gate(
-        Fr::from(22u64),
-        Fr::from(202u64),
-        Fr::from(2002u64),
-        Fr::from(0u64),
-        Fr::from(0u64),
-        Fr::from(0u64),
-        Fr::from(0u64),
-        Fr::from(0u64),
-    );
-    circuit.add_gate(
-        Fr::from(33u64),
-        Fr::from(303u64),
-        Fr::from(3003u64),
-        Fr::from(0u64),
-        Fr::from(0u64),
-        Fr::from(0u64),
-        Fr::from(0u64),
-        Fr::from(0u64),
-    );
+    circuit
+        .add_gate(
+            Fr::from(11u64),
+            Fr::from(101u64),
+            Fr::from(1001u64),
+            Fr::from(0u64),
+            Fr::from(0u64),
+            Fr::from(0u64),
+            Fr::from(0u64),
+            Fr::from(0u64),
+        )
+        .expect("adding gate should succeed");
+    circuit
+        .add_gate(
+            Fr::from(22u64),
+            Fr::from(202u64),
+            Fr::from(2002u64),
+            Fr::from(0u64),
+            Fr::from(0u64),
+            Fr::from(0u64),
+            Fr::from(0u64),
+            Fr::from(0u64),
+        )
+        .expect("adding gate should succeed");
+    circuit
+        .add_gate(
+            Fr::from(33u64),
+            Fr::from(303u64),
+            Fr::from(3003u64),
+            Fr::from(0u64),
+            Fr::from(0u64),
+            Fr::from(0u64),
+            Fr::from(0u64),
+            Fr::from(0u64),
+        )
+        .expect("adding gate should succeed");
 
     circuit.pad_to_domain();
     circuit
@@ -55,16 +61,18 @@ fn build_padded_sample_circuit() -> Circuit {
 #[test]
 fn witness_extraction_requires_padded_circuit() {
     let mut circuit = Circuit::new();
-    circuit.add_gate(
-        Fr::from(1u64),
-        Fr::from(2u64),
-        Fr::from(3u64),
-        Fr::from(0u64),
-        Fr::from(0u64),
-        Fr::from(0u64),
-        Fr::from(0u64),
-        Fr::from(0u64),
-    );
+    circuit
+        .add_gate(
+            Fr::from(1u64),
+            Fr::from(2u64),
+            Fr::from(3u64),
+            Fr::from(0u64),
+            Fr::from(0u64),
+            Fr::from(0u64),
+            Fr::from(0u64),
+            Fr::from(0u64),
+        )
+        .expect("adding gate should succeed");
 
     let result = WitnessColumns::from_padded_circuit(&circuit);
     assert_eq!(

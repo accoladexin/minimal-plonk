@@ -7,6 +7,8 @@
 pub mod builtin_gates;
 pub mod circuit;
 pub mod gate;
+pub mod selectors;
 
 pub use circuit::Circuit;
 pub use gate::GateRow;
+pub use selectors::SelectorColumns;
