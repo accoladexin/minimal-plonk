@@ -177,6 +177,65 @@ pub struct RowTerms {
     pub denominator: Fr,
 }
 
+/// Step 5.1 在构造 sigma 多项式时需要的三列 sigma tag evaluations。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SigmaTagEvaluations {
+    pub sigma_a_evaluations: Vec<Fr>,
+    pub sigma_b_evaluations: Vec<Fr>,
+    pub sigma_c_evaluations: Vec<Fr>,
+}
+
+/// 功能说明：为 Step 5.1 暴露单行 permutation 的 numerator/denominator 计算。
+/// 输入：domain、sigma、行索引、该行 a/b/c、beta、gamma。
+/// 输出：该行对应的 `RowTerms`。
+/// 示例：Step 5.1 可用它构造 `Z[i+1]*denominator_i - Z[i]*numerator_i`。
+pub fn compute_row_terms_for_quotient(
+    domain: &PlonkDomain,
+    sigma: &SigmaMapping,
+    row_index: usize,
+    a_value: Fr,
+    b_value: Fr,
+    c_value: Fr,
+    beta: Fr,
+    gamma: Fr,
+) -> Result<RowTerms> {
+    row_terms(
+        domain, sigma, row_index, a_value, b_value, c_value, beta, gamma,
+    )
+}
+
+/// 功能说明：为 Step 5.1 构造三列 sigma tag 在原始 H-domain 上的 evaluations。
+/// 输入：原始 domain 与 sigma。
+/// 输出：`(sigma_a, sigma_b, sigma_c)` 三列 tag evaluations。
+/// 示例：后续可以把这些点值插值成 `S_sigma1(X), S_sigma2(X), S_sigma3(X)`。
+pub(crate) fn compute_sigma_tag_evaluations_for_quotient(
+    domain: &PlonkDomain,
+    sigma: &SigmaMapping,
+) -> Result<SigmaTagEvaluations> {
+    validate_sigma_bijection(sigma)?;
+    ensure(
+        sigma.domain_size() == domain.size(),
+        "sigma domain_size must match the original H-domain size",
+    )?;
+
+    let domain_size = domain.size();
+    let mut sigma_a_evaluations = Vec::with_capacity(domain_size);
+    let mut sigma_b_evaluations = Vec::with_capacity(domain_size);
+    let mut sigma_c_evaluations = Vec::with_capacity(domain_size);
+
+    for row_index in 0..domain_size {
+        sigma_a_evaluations.push(sigma_target_tag(sigma, domain, Column::A, row_index)?);
+        sigma_b_evaluations.push(sigma_target_tag(sigma, domain, Column::B, row_index)?);
+        sigma_c_evaluations.push(sigma_target_tag(sigma, domain, Column::C, row_index)?);
+    }
+
+    Ok(SigmaTagEvaluations {
+        sigma_a_evaluations,
+        sigma_b_evaluations,
+        sigma_c_evaluations,
+    })
+}
+
 /// 功能说明：校验 grand product 入口需要的输入是否一致。
 /// 输入：三列 witness evaluations 和 sigma。
 /// 输出：`Ok(())` 或错误。

@@ -9,6 +9,7 @@ pub mod error;
 pub mod mimc;
 pub mod permutation;
 pub mod prelude;
+pub mod quotient;
 pub mod transcript;
 pub mod types;
 pub mod validate;
