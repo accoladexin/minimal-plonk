@@ -6,6 +6,7 @@ pub mod curve;
 pub mod cs;
 pub mod domain;
 pub mod error;
+pub mod kzg;
 pub mod mimc;
 pub mod permutation;
 pub mod prelude;

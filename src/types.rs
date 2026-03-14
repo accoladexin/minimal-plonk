@@ -92,6 +92,7 @@ impl Commitment {
     }
 
     /// 把 projective 点转换成更适合存储的 affine 点。
+    /// affine适合存储不适合计算，肯定有压缩之类的
     pub fn from_projective(point: G1) -> Self {
         Self {
             point: point.into_affine(),
