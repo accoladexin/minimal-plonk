@@ -117,6 +117,93 @@ fn build_valid_inputs() -> QuotientInputs {
     QuotientInputs::new(witness, selectors, sigma, z).expect("quotient inputs should build")
 }
 
+/// 构造一个显式依赖 public inputs 的最小电路，并带上非空 copy constraints。
+fn build_public_input_bound_inputs() -> (QuotientInputs, Vec<Fr>) {
+    let public_inputs = vec![Fr::from(5u64), Fr::from(9u64)];
+    let sum = public_inputs[0] + public_inputs[1];
+
+    let mut circuit = Circuit::new();
+    circuit
+        .add_gate(
+            public_inputs[0],
+            Fr::from(0u64),
+            Fr::from(0u64),
+            -Fr::from(1u64),
+            Fr::from(0u64),
+            Fr::from(0u64),
+            Fr::from(0u64),
+            Fr::from(0u64),
+        )
+        .expect("adding public-input gate should succeed");
+    circuit
+        .add_gate(
+            public_inputs[1],
+            Fr::from(0u64),
+            Fr::from(0u64),
+            -Fr::from(1u64),
+            Fr::from(0u64),
+            Fr::from(0u64),
+            Fr::from(0u64),
+            Fr::from(0u64),
+        )
+        .expect("adding public-input gate should succeed");
+    circuit
+        .add_gate(
+            public_inputs[0],
+            public_inputs[1],
+            sum,
+            Fr::from(1u64),
+            Fr::from(1u64),
+            -Fr::from(1u64),
+            Fr::from(0u64),
+            Fr::from(0u64),
+        )
+        .expect("adding sum gate should succeed");
+    circuit.pad_to_domain();
+
+    let witness = WitnessColumns::from_padded_circuit(&circuit).expect("witness should extract");
+    let selectors =
+        SelectorColumns::from_padded_circuit(&circuit).expect("selectors should extract");
+    let sigma_constraints = vec![
+        CopyConstraint {
+            left: Pos {
+                col: Column::A,
+                row: 0,
+            },
+            right: Pos {
+                col: Column::A,
+                row: 2,
+            },
+        },
+        CopyConstraint {
+            left: Pos {
+                col: Column::A,
+                row: 1,
+            },
+            right: Pos {
+                col: Column::B,
+                row: 2,
+            },
+        },
+    ];
+    let sigma = build_sigma_from_copy_constraints(witness.domain_size(), &sigma_constraints)
+        .expect("sigma should build");
+    let z = compute_grand_product_evaluations(
+        &witness.wire_a_evaluations,
+        &witness.wire_b_evaluations,
+        &witness.wire_c_evaluations,
+        &sigma,
+        sample_beta(),
+        sample_gamma(),
+    )
+    .expect("grand product should compute");
+
+    (
+        QuotientInputs::new(witness, selectors, sigma, z).expect("quotient inputs should build"),
+        public_inputs,
+    )
+}
+
 /// 判断一个 evaluations 向量里是否有非零值。
 fn has_nonzero(values: &[Fr]) -> bool {
     values.iter().any(|value| !value.is_zero())
@@ -140,6 +227,7 @@ fn h_domain_numerator_is_zero_for_valid_inputs() {
     let inputs = build_valid_inputs();
     let output = compute_h_domain_constraint_evaluations(
         &inputs,
+        &[],
         sample_alpha(),
         sample_beta(),
         sample_gamma(),
@@ -180,6 +268,7 @@ fn h_domain_gate_failure_makes_numerator_nonzero() {
 
     let output = compute_h_domain_constraint_evaluations(
         &broken_inputs,
+        &[],
         sample_alpha(),
         sample_beta(),
         sample_gamma(),
@@ -214,6 +303,7 @@ fn h_domain_permutation_failure_makes_numerator_nonzero() {
 
     let output = compute_h_domain_constraint_evaluations(
         &broken_inputs,
+        &[],
         sample_alpha(),
         sample_beta(),
         sample_gamma(),
@@ -248,6 +338,7 @@ fn h_domain_boundary_failure_makes_numerator_nonzero() {
 
     let output = compute_h_domain_constraint_evaluations(
         &broken_inputs,
+        &[],
         sample_alpha(),
         sample_beta(),
         sample_gamma(),
@@ -256,6 +347,40 @@ fn h_domain_boundary_failure_makes_numerator_nonzero() {
 
     assert!(has_nonzero(&output.boundary_term_2_evaluations));
     assert!(has_nonzero(&output.numerator_evaluations));
+}
+
+/// public inputs 必须进入主约束，而不是只影响 transcript。
+#[test]
+fn h_domain_public_input_term_binds_statement_into_main_constraints() {
+    let (inputs, public_inputs) = build_public_input_bound_inputs();
+    let matching = compute_h_domain_constraint_evaluations(
+        &inputs,
+        &public_inputs,
+        sample_alpha(),
+        sample_beta(),
+        sample_gamma(),
+    )
+    .expect("matching public inputs should compute");
+    let wrong_public_inputs = vec![public_inputs[0] + Fr::from(1u64), public_inputs[1]];
+    let mismatched = compute_h_domain_constraint_evaluations(
+        &inputs,
+        &wrong_public_inputs,
+        sample_alpha(),
+        sample_beta(),
+        sample_gamma(),
+    )
+    .expect("mismatched public inputs should still compute");
+
+    assert_eq!(matching.public_input_term_evaluations[0], public_inputs[0]);
+    assert_eq!(matching.public_input_term_evaluations[1], public_inputs[1]);
+    assert!(
+        matching
+            .numerator_evaluations
+            .iter()
+            .all(|value| value.is_zero())
+    );
+    assert!(has_nonzero(&mismatched.public_input_term_evaluations));
+    assert!(has_nonzero(&mismatched.numerator_evaluations));
 }
 
 /// 扩展 quotient domain 的大小应固定为 next_power_of_two(4 * n)。
@@ -272,7 +397,7 @@ fn extended_quotient_domain_uses_next_power_of_two_of_four_n() {
 fn extended_domain_quotient_recomposes_numerator_polynomial() {
     let inputs = build_valid_inputs();
     let output =
-        compute_extended_domain_quotient(&inputs, sample_alpha(), sample_beta(), sample_gamma())
+        compute_extended_domain_quotient(&inputs, &[], sample_alpha(), sample_beta(), sample_gamma())
             .expect("extended-domain quotient should compute");
 
     let vanishing_polynomial = build_h_vanishing_polynomial(output.original_domain_size);
@@ -288,7 +413,7 @@ fn extended_domain_quotient_recomposes_numerator_polynomial() {
 fn extended_domain_pointwise_division_matches_numerator() {
     let inputs = build_valid_inputs();
     let output =
-        compute_extended_domain_quotient(&inputs, sample_alpha(), sample_beta(), sample_gamma())
+        compute_extended_domain_quotient(&inputs, &[], sample_alpha(), sample_beta(), sample_gamma())
             .expect("extended-domain quotient should compute");
 
     for index in 0..output.extended_domain_size {
@@ -303,7 +428,7 @@ fn extended_domain_pointwise_division_matches_numerator() {
 #[test]
 fn step_5_1_output_contains_both_layers() {
     let inputs = build_valid_inputs();
-    let output = compute_step_5_1(&inputs, sample_alpha(), sample_beta(), sample_gamma())
+    let output = compute_step_5_1(&inputs, &[], sample_alpha(), sample_beta(), sample_gamma())
         .expect("step 5.1 output should compute");
 
     assert!(

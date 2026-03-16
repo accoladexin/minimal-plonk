@@ -98,17 +98,24 @@ cargo bench
 - `src/error.rs`
 - `src/prelude.rs`
 - `src/transcript.rs`
-- `src/types.rs`
+- `src/types/`
 - `src/validate.rs`
-- `examples/mimc.rs`
-
-#### [Planned]
 - `src/permutation/`
 - `src/quotient/`
 - `src/kzg/`
 - `src/prover.rs`
 - `src/verifier.rs`
+- `examples/mimc.rs`
+
+#### [Planned]
 - `benches/`
+
+### Current Roadmap
+
+- Phase 9: paper-aligned prover / verifier refinement
+- Phase 10: zero-knowledge blinding alignment
+- Phase 11: benchmark
+- Phase 12: documentation polish and reproducibility wrap-up
 
 ## 参考资料
 

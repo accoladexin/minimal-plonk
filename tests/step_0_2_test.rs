@@ -1,42 +1,59 @@
-//! Step 0.2 验收测试：
-//! - transcript 的确定性与敏感性
-//! - 公共类型的 canonical serialize / deserialize
+//! Step 0.2 acceptance tests.
+//! - transcript determinism and sensitivity
+//! - canonical serialization for shared protocol types
 
 use ark_ec::Group;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use minimal_plonk::{
     curve::{Fr, G1},
     transcript::Transcript,
-    types::{Commitment, DomainParams, PlonkConfig, ProofSkeleton, TranscriptHash},
+    types::{
+        Commitment, DomainParams, EvaluationsAtZeta, OpeningProof, PlonkConfig, PlonkProof,
+        TranscriptHash,
+    },
 };
 
-/// 构造一份固定输入的 transcript，方便多个测试复用。
+/// Builds a transcript with stable sample inputs.
 fn sample_transcript(hash: TranscriptHash) -> Transcript {
     let mut transcript = Transcript::new(b"minimal-plonk-test", hash);
     transcript.append_bytes(b"instance", b"toy-circuit");
     transcript.append_scalar(b"alpha", &Fr::from(7u64));
-    transcript.append_commitment(b"wire_a", &sample_commitment());
+    transcript.append_commitment(b"wire_a", &sample_commitment(1));
     transcript
 }
 
-/// 构造一个稳定的测试承诺。
-fn sample_commitment() -> Commitment {
-    Commitment::from_projective(G1::generator())
+/// Builds a deterministic commitment for tests.
+fn sample_commitment(multiplier: u64) -> Commitment {
+    let mut point = G1::generator();
+    point *= Fr::from(multiplier);
+    Commitment::from_projective(point)
 }
 
-/// 构造一份最小 proof skeleton，专门用于 round-trip 测试。
-fn sample_proof() -> ProofSkeleton {
-    ProofSkeleton {
-        wire_commitments: vec![sample_commitment()],
-        quotient_commitment: Some(sample_commitment()),
-        grand_product_commitment: Some(sample_commitment()),
-        opening_proof: Some(sample_commitment()),
-        public_inputs: vec![Fr::from(3u64), Fr::from(5u64)],
-        evaluations: vec![Fr::from(8u64), Fr::from(13u64)],
-    }
+/// Builds a minimal Step 7.1 proof for round-trip tests.
+fn sample_proof() -> PlonkProof {
+    PlonkProof::new(
+        [
+            sample_commitment(1),
+            sample_commitment(2),
+            sample_commitment(3),
+        ],
+        sample_commitment(4),
+        sample_commitment(5),
+        vec![Fr::from(3u64), Fr::from(5u64)],
+        EvaluationsAtZeta::new(
+            Fr::from(8u64),
+            Fr::from(13u64),
+            Fr::from(21u64),
+            Fr::from(34u64),
+            Fr::from(55u64),
+        ),
+        minimal_plonk::types::ShiftedEvaluations::new(Fr::from(89u64)),
+        OpeningProof::new(sample_commitment(6)),
+        OpeningProof::new(sample_commitment(7)),
+    )
 }
 
-/// 同样输入必须导出同样 challenge。
+/// Same input must produce the same challenge.
 #[test]
 fn transcript_is_deterministic_for_same_input() {
     let mut left = sample_transcript(TranscriptHash::Blake2b);
@@ -48,7 +65,7 @@ fn transcript_is_deterministic_for_same_input() {
     );
 }
 
-/// 只要输入变化，challenge 就必须变化。
+/// Any input change must change the derived challenge.
 #[test]
 fn transcript_challenge_changes_when_input_changes() {
     let mut original = sample_transcript(TranscriptHash::Blake2b);
@@ -61,7 +78,7 @@ fn transcript_challenge_changes_when_input_changes() {
     );
 }
 
-/// 不同哈希配置应当走通同一套流程。
+/// The alternative SHA256 backend should still work end to end.
 #[test]
 fn transcript_supports_sha256_as_an_alternative_hash() {
     let mut transcript = sample_transcript(TranscriptHash::Sha256);
@@ -70,10 +87,10 @@ fn transcript_supports_sha256_as_an_alternative_hash() {
     assert_ne!(challenge, Fr::from(0u64));
 }
 
-/// 单个 Commitment 必须能稳定 round-trip。
+/// Commitments must support canonical round-trip serialization.
 #[test]
 fn commitment_supports_canonical_round_trip() {
-    let commitment = sample_commitment();
+    let commitment = sample_commitment(9);
     let mut bytes = Vec::new();
 
     commitment
@@ -86,23 +103,23 @@ fn commitment_supports_canonical_round_trip() {
     assert_eq!(commitment, decoded);
 }
 
-/// ProofSkeleton 必须能稳定 round-trip。
+/// The frozen proof type must support canonical round-trip serialization.
 #[test]
-fn proof_skeleton_supports_canonical_round_trip() {
+fn plonk_proof_supports_canonical_round_trip() {
     let proof = sample_proof();
     let mut bytes = Vec::new();
 
     proof
         .serialize_compressed(&mut bytes)
-        .expect("serializing proof skeleton should succeed");
+        .expect("serializing plonk proof should succeed");
 
-    let decoded = ProofSkeleton::deserialize_compressed(bytes.as_slice())
-        .expect("deserializing proof skeleton should succeed");
+    let decoded = PlonkProof::deserialize_compressed(bytes.as_slice())
+        .expect("deserializing plonk proof should succeed");
 
     assert_eq!(proof, decoded);
 }
 
-/// DomainParams 与 PlonkConfig 也应具有稳定序列化行为。
+/// Domain parameters and config must stay canonically serializable.
 #[test]
 fn config_and_domain_params_support_canonical_round_trip() {
     let domain = DomainParams::new(8, 3, Fr::from(5u64));

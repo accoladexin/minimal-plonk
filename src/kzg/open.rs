@@ -9,15 +9,12 @@ use crate::{
     curve::Fr,
     error::{PlonkError, Result},
     kzg::{commit::commit_polynomial, srs::KzgSrs},
-    types::Commitment,
+    types::OpeningProof,
     validate::ensure,
 };
 
-/// Opening proof for one polynomial at one point.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct KzgOpeningProof {
-    pub witness_commitment: Commitment,
-}
+/// Shared KZG opening proof type.
+pub type KzgOpeningProof = OpeningProof;
 
 /// Opening output for one polynomial at one point.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,6 +33,7 @@ pub fn open_polynomial_at_point(
     point: Fr,
     srs: &KzgSrs,
 ) -> Result<KzgOpening> {
+    // Paper mapping: single-point KZG opening, reused for the shifted Z(omega * zeta) claim.
     // 检查多项式的度数是否超过 SRS 支持的最大度数。
     srs.validate_polynomial_degree(polynomial.degree())?;
     // 计算 p(z)。
@@ -47,7 +45,7 @@ pub fn open_polynomial_at_point(
     Ok(KzgOpening {
         point,
         value,
-        proof: KzgOpeningProof { witness_commitment },
+        proof: OpeningProof::new(witness_commitment),
     })
 }
 
@@ -60,6 +58,7 @@ fn build_witness_polynomial(
     point: Fr,
     value: Fr,
 ) -> Result<DensePolynomial<Fr>> {
+    // Paper mapping: witness polynomial w(X) = (p(X) - p(z)) / (X - z) behind the KZG opening equation.
     // 构建常数多项式 `f(X) = 常数`。
     let constant_polynomial = DensePolynomial::from_coefficients_vec(vec![value]);
     // 构建分子多项式 ，直接在多项式上计算，相当于常数项相减。

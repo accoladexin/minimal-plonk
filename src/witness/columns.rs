@@ -36,7 +36,7 @@ impl WitnessColumns {
                 "after pad_to_domain, domain_size must equal circuit row length",
             ));
         }
-
+        
         let mut wire_a_evaluations = Vec::with_capacity(domain_size);
         let mut wire_b_evaluations = Vec::with_capacity(domain_size);
         let mut wire_c_evaluations = Vec::with_capacity(domain_size);

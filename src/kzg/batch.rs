@@ -35,6 +35,7 @@ pub fn open_polynomials_at_same_point(
     aggregation_challenge: Fr,
     srs: &KzgSrs,
 ) -> Result<KzgBatchOpening> {
+    // Paper mapping: same-point batch opening aggregation used for A, B, C, Z, T at zeta.
     // 检查输入多项式列表非空。
     ensure(!polynomials.is_empty(), "polynomial list must be non-empty")?;
 
@@ -67,6 +68,7 @@ pub fn verify_polynomials_at_same_point(
     proof: &KzgOpeningProof,
     srs: &KzgSrs,
 ) -> Result<bool> {
+    // Paper mapping: verifier-side check for the same batch opening aggregation.
     ensure(!commitments.is_empty(), "commitment list must be non-empty")?;
     ensure(
         commitments.len() == values.len(),
@@ -93,6 +95,7 @@ fn aggregate_polynomials(
     polynomials: &[DensePolynomial<Fr>],
     aggregation_challenge: Fr,
 ) -> DensePolynomial<Fr> {
+    // Paper mapping: batch opening aggregation sum_i v^i * p_i(X).
     let mut aggregated = DensePolynomial::zero();
     let mut weight = Fr::from(1u64);
     for polynomial in polynomials {
@@ -108,6 +111,7 @@ fn aggregate_polynomials(
 /// Output: `sum_i v^i * C_i`.
 /// Example: order is exactly the input slice order.
 fn aggregate_commitments(commitments: &[Commitment], aggregation_challenge: Fr) -> Commitment {
+    // Paper mapping: commitment-side image of the same batch opening aggregation.
     let mut aggregated = G1::zero();
     let mut weight = Fr::from(1u64);
     for commitment in commitments {
@@ -125,6 +129,7 @@ fn aggregate_commitments(commitments: &[Commitment], aggregation_challenge: Fr) 
 /// Output: `sum_i v^i * y_i`.
 /// Example: order is exactly the input slice order.
 fn aggregate_values(values: &[Fr], aggregation_challenge: Fr) -> Fr {
+    // Paper mapping: evaluation-side image of the same batch opening aggregation.
     let mut aggregated = Fr::zero();
     let mut weight = Fr::from(1u64);
     for value in values {

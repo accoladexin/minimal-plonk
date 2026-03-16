@@ -14,7 +14,7 @@ use crate::{
 pub struct Circuit {
     rows: Vec<GateRow>,
     domain_size: Option<usize>,
-    is_frozen: bool,
+    is_frozen: bool, // 标记电路是否已冻结
 }
 
 impl Circuit {

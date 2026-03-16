@@ -37,6 +37,7 @@ pub struct HDomainConstraintEvaluations {
     pub domain_size: usize,
     /// gate 约束在 H 上每个点的值。
     pub gate_term_evaluations: Vec<Fr>,
+    pub public_input_term_evaluations: Vec<Fr>,
     /// permutation recursion 零化式在 H 上每个点的值。
     pub permutation_term_evaluations: Vec<Fr>,
     /// `Z(1) = 1` 这条 boundary 约束在 H 上的编码结果。
@@ -62,6 +63,7 @@ pub struct ExtendedDomainQuotientComputation {
     pub extended_domain_size: usize,
     /// gate 约束在扩展 domain 上的 evaluations。
     pub gate_term_evaluations: Vec<Fr>,
+    pub public_input_term_evaluations: Vec<Fr>,
     /// permutation 约束在扩展 domain 上的 evaluations。
     pub permutation_term_evaluations: Vec<Fr>,
     /// 第一个 boundary 约束在扩展 domain 上的 evaluations。
@@ -75,7 +77,7 @@ pub struct ExtendedDomainQuotientComputation {
     /// 原始 H 的 vanishing polynomial 在扩展 domain 上的 evaluations。
     pub vanishing_evaluations: Vec<Fr>,
     /// pointwise `numerator / Z_H` 得到的 quotient evaluations。
-    pub quotient_evaluations: Vec<Fr>,
+    pub quotient_evaluations: Vec<Fr>, // （这个是在coset上评估的，不是原始H上的）
     /// 由 quotient evaluations 插值得到的 quotient polynomial。
     pub quotient_polynomial: DensePolynomial<Fr>,
 }
@@ -98,6 +100,7 @@ pub struct Step5_1QuotientOutput {
 struct Step5_1Polynomials {
     witness_polynomials: WitnessPolynomials,
     selector_polynomials: SelectorPolynomials,
+    public_input_polynomial: DensePolynomial<Fr>,
     sigma_tag_polynomials: SigmaTagPolynomials,
     z_polynomial: DensePolynomial<Fr>,
     l_0_polynomial: DensePolynomial<Fr>,
@@ -174,10 +177,13 @@ pub fn build_extended_quotient_domain(domain_size: usize) -> Result<PlonkDomain>
 /// plonk的round3部分
 pub fn compute_h_domain_constraint_evaluations(
     inputs: &QuotientInputs,
+    public_inputs: &[Fr],
     alpha: Fr,
     beta: Fr,
     gamma: Fr,
 ) -> Result<HDomainConstraintEvaluations> {
+    // Paper mapping: corresponds to the quotient-identity stage of the prover.
+    // Repo role: this repository first checks the aggregated numerator directly on H for readability.
     let domain_size = inputs.domain_size;
     ensure(domain_size > 0, "domain_size must be positive")?;
 
@@ -190,6 +196,8 @@ pub fn compute_h_domain_constraint_evaluations(
     let original_domain = build_domain_from_size(domain_size)?;
     // gate约束
     let gate_term_evaluations = compute_gate_term_evaluations_on_h(inputs)?;
+    let public_input_term_evaluations =
+        build_public_input_evaluations(domain_size, public_inputs)?;
     // permutation约束
     let permutation_term_evaluations =
         compute_permutation_term_evaluations_on_h(inputs, &original_domain, beta, gamma)?;
@@ -199,6 +207,7 @@ pub fn compute_h_domain_constraint_evaluations(
 
     let numerator_evaluations = aggregate_numerator_evaluations(
         &gate_term_evaluations,
+        &public_input_term_evaluations,
         &permutation_term_evaluations,
         &boundary_term_1_evaluations,
         &boundary_term_2_evaluations,
@@ -208,6 +217,7 @@ pub fn compute_h_domain_constraint_evaluations(
     Ok(HDomainConstraintEvaluations {
         domain_size,
         gate_term_evaluations,
+        public_input_term_evaluations,
         permutation_term_evaluations,
         boundary_term_1_evaluations,
         boundary_term_2_evaluations,
@@ -221,19 +231,24 @@ pub fn compute_h_domain_constraint_evaluations(
 /// 示例：可用于检查 `quotient_poly * Z_H(X) == numerator_poly`。
 pub fn compute_extended_domain_quotient(
     inputs: &QuotientInputs,
+    public_inputs: &[Fr],
     alpha: Fr,
     beta: Fr,
     gamma: Fr,
 ) -> Result<ExtendedDomainQuotientComputation> {
+    // Paper mapping: corresponds to the prover-side quotient witness T(X).
+    // Repo role: this repository builds that witness on an extended domain after the separate H-domain check.
     let original_domain_size = inputs.domain_size;
     let original_domain = build_domain_from_size(original_domain_size)?;
     let extended_domain = build_extended_quotient_domain(original_domain_size)?;
     // 把所有点值插值成多项式，因为后续要在coset上评估，而不是在H上复用 evaluations 了。
     // 目前是在H上的多项式形式，包括了[1,0,0,...]和[0,0,...,1]的插值多项式。
-    let polynomials = interpolate_step_5_1_polynomials(inputs, &original_domain)?;
+    let polynomials = interpolate_step_5_1_polynomials(inputs, public_inputs, &original_domain)?;
     //gate约束
     let gate_term_evaluations =
         compute_gate_term_evaluations_on_extended_domain(&polynomials, &extended_domain);
+    let public_input_term_evaluations =
+        extend_poly_to_evals(&polynomials.public_input_polynomial, &extended_domain);
     //permutation约束
     let permutation_term_evaluations = compute_permutation_term_evaluations_on_extended_domain(
         &polynomials,
@@ -252,6 +267,7 @@ pub fn compute_extended_domain_quotient(
     // 分子
     let numerator_evaluations = aggregate_numerator_evaluations(
         &gate_term_evaluations,
+        &public_input_term_evaluations,
         &permutation_term_evaluations,
         &boundary_term_1_evaluations,
         &boundary_term_2_evaluations,
@@ -273,6 +289,7 @@ pub fn compute_extended_domain_quotient(
         original_domain_size,
         extended_domain_size: extended_domain.size(),
         gate_term_evaluations,
+        public_input_term_evaluations,
         permutation_term_evaluations,
         boundary_term_1_evaluations,
         boundary_term_2_evaluations,
@@ -290,12 +307,17 @@ pub fn compute_extended_domain_quotient(
 /// 示例：测试中既可以检查 H 上全 0，也可以检查 quotient 重组关系。
 pub fn compute_step_5_1(
     inputs: &QuotientInputs,
+    public_inputs: &[Fr],
     alpha: Fr,
     beta: Fr,
     gamma: Fr,
 ) -> Result<Step5_1QuotientOutput> {
-    let h_domain = compute_h_domain_constraint_evaluations(inputs, alpha, beta, gamma)?;
-    let extended_domain = compute_extended_domain_quotient(inputs, alpha, beta, gamma)?;
+    // Paper mapping: corresponds to the quotient-identity stage of the prover.
+    // Repo role: this repository groups an H-domain zero check together with the extended-domain T(X) witness.
+    let h_domain =
+        compute_h_domain_constraint_evaluations(inputs, public_inputs, alpha, beta, gamma)?;
+    let extended_domain =
+        compute_extended_domain_quotient(inputs, public_inputs, alpha, beta, gamma)?;
 
     Ok(Step5_1QuotientOutput {
         h_domain,
@@ -309,8 +331,11 @@ pub fn compute_step_5_1(
 /// 示例：extended-domain quotient 构造层会复用这些多项式。
 fn interpolate_step_5_1_polynomials(
     inputs: &QuotientInputs,
+    public_inputs: &[Fr],
     original_domain: &PlonkDomain,
 ) -> Result<Step5_1Polynomials> {
+    // Paper mapping: prepares the polynomial inputs consumed by the quotient identity.
+    // Repo role: converts row-wise data into polynomial form for the repository's extended-domain path.
     let witness_polynomials = WitnessPolynomials {
         wire_a_polynomial: evaluations_to_polynomial(
             original_domain,
@@ -349,6 +374,11 @@ fn interpolate_step_5_1_polynomials(
         )?,
     };
 
+    let public_input_polynomial = evaluations_to_polynomial(
+        original_domain,
+        &build_public_input_evaluations(inputs.domain_size, public_inputs)?,
+    )?;
+
     let sigma_tag_evaluations =
         compute_sigma_tag_evaluations_for_quotient(original_domain, &inputs.sigma_mapping)?;
     let sigma_tag_polynomials = SigmaTagPolynomials {
@@ -384,6 +414,7 @@ fn interpolate_step_5_1_polynomials(
     Ok(Step5_1Polynomials {
         witness_polynomials,
         selector_polynomials,
+        public_input_polynomial,
         sigma_tag_polynomials,
         z_polynomial,
         l_0_polynomial,
@@ -395,7 +426,30 @@ fn interpolate_step_5_1_polynomials(
 /// 输入：`QuotientInputs`。
 /// 输出：长度为 `n` 的 gate evaluations。
 /// 示例：第 i 个位置对应第 i 行 gate 约束左边的值。
+/// 鍔熻兘璇存槑锛氭寜褰撳墠鏈€灏忔柟妗堟瀯閫?public input contribution 鍦?H 涓婄殑 evaluations銆?///
+/// 杈撳叆锛歞omain 澶у皬鍜屾寜 statement 椤哄簭鎺掑垪鐨?public inputs銆?///
+/// 杈撳嚭锛氶暱搴︿负 `domain_size` 鐨?evaluations锛屽墠 `m` 涓偣鏄?public inputs锛屽叾浣欑偣涓?0銆?///
+/// 绀轰緥锛氳嫢 `public_inputs = [7, 11]`锛屽垯 `PI(omega^0)=7, PI(omega^1)=11`銆?
+fn build_public_input_evaluations(
+    domain_size: usize,
+    public_inputs: &[Fr],
+) -> Result<Vec<Fr>> {
+    // Paper mapping: feeds the statement contribution into the quotient identity.
+    // Implementation note: this is the repository's minimal public-input encoding, not a direct paper formula.
+    ensure(
+        public_inputs.len() <= domain_size,
+        "public input length must not exceed domain_size",
+    )?;
+
+    let mut evaluations = vec![Fr::zero(); domain_size];
+    for (index, public_input) in public_inputs.iter().enumerate() {
+        evaluations[index] = *public_input;
+    }
+    Ok(evaluations)
+}
+
 fn compute_gate_term_evaluations_on_h(inputs: &QuotientInputs) -> Result<Vec<Fr>> {
+    // Paper mapping: gate relation qM*a*b + qL*a + qR*b + qO*c + qC on each H row.
     let domain_size = inputs.domain_size;
     let witness = &inputs.witness_columns;
     let selector = &inputs.selector_columns;
@@ -438,6 +492,7 @@ fn compute_permutation_term_evaluations_on_h(
     beta: Fr,
     gamma: Fr,
 ) -> Result<Vec<Fr>> {
+    // Paper mapping: grand product recurrence rewritten as a zero-check term on H.
     let domain_size = inputs.domain_size;
     let z_evaluations = &inputs.grand_product_evaluations.grand_product_evaluations;
     ensure(
@@ -474,6 +529,7 @@ fn compute_boundary_term_evaluations_on_h(
     inputs: &QuotientInputs,
     original_domain: &PlonkDomain,
 ) -> Result<(Vec<Fr>, Vec<Fr>)> {
+    // Paper mapping: permutation boundary relations Z(1)=1 and Z(omega^n)=1.
     let domain_size = inputs.domain_size;
     let z_evaluations = &inputs.grand_product_evaluations.grand_product_evaluations;
     ensure(
@@ -567,6 +623,7 @@ fn compute_gate_term_evaluations_on_extended_domain(
     polynomials: &Step5_1Polynomials,
     extended_domain: &PlonkDomain,
 ) -> Vec<Fr> {
+    // Paper mapping: the same gate identity, now sampled where quotient division is performed.
     // 1. 批量升维：所有的 $O(n \log n)$ 计算都在这一步完成
     let a_evals = extend_poly_to_evals(
         &polynomials.witness_polynomials.wire_a_polynomial,
@@ -624,6 +681,7 @@ fn compute_permutation_term_evaluations_on_extended_domain(
     beta: Fr,
     gamma: Fr,
 ) -> Vec<Fr> {
+    // Paper mapping: quotient permutation term evaluated at X and omega*X on the extended domain.
     let omega = original_domain.group_gen();
     let k1 = Fr::from(K1);
     let k2 = Fr::from(K2);
@@ -687,6 +745,7 @@ fn compute_boundary_term_evaluations_on_extended_domain(
     original_domain: &PlonkDomain,
     extended_domain: &PlonkDomain,
 ) -> (Vec<Fr>, Vec<Fr>) {
+    // Paper mapping: L_0(X) and L_{n-1}(X) gate the two permutation boundary checks inside the numerator.
     let omega = original_domain.group_gen();
     let one = Fr::from(1u64); // 黄金标准：边界值必须是 1
     let mut boundary_term_1_evaluations = Vec::with_capacity(extended_domain.size());
@@ -714,14 +773,18 @@ fn compute_boundary_term_evaluations_on_extended_domain(
 /// 在domian上计算，只是确实了vanish多项式
 fn aggregate_numerator_evaluations(
     gate_term_evaluations: &[Fr],
+    public_input_term_evaluations: &[Fr],
     permutation_term_evaluations: &[Fr],
     boundary_term_1_evaluations: &[Fr],
     boundary_term_2_evaluations: &[Fr],
     alpha: Fr,
 ) -> Result<Vec<Fr>> {
+    // Paper mapping: quotient aggregation term combining gate, permutation, and boundary relations.
+    // Repo role: this repository also inserts its minimal public-input contribution here and keeps the order explicit.
     let length = gate_term_evaluations.len();
     ensure(
-        permutation_term_evaluations.len() == length
+        public_input_term_evaluations.len() == length
+            && permutation_term_evaluations.len() == length
             && boundary_term_1_evaluations.len() == length
             && boundary_term_2_evaluations.len() == length,
         "all term evaluations must have the same length",
@@ -733,6 +796,7 @@ fn aggregate_numerator_evaluations(
     for row_index in 0..length {
         numerator_evaluations.push(
             gate_term_evaluations[row_index]
+                + public_input_term_evaluations[row_index]
                 + alpha * permutation_term_evaluations[row_index]
                 + alpha_square * boundary_term_1_evaluations[row_index]
                 + alpha_cube * boundary_term_2_evaluations[row_index],
@@ -742,7 +806,7 @@ fn aggregate_numerator_evaluations(
     Ok(numerator_evaluations)
 }
 
-/// 功能说明：评估原始 H 的 vanishing polynomial 到扩展 domain 上。
+/// 功能说明：评估原始 H 的 vanishing polynomial 到扩展 coset domain 上。
 /// 输入：原始 H-domain 与扩展 domain。
 /// 输出：`Z_H(X)` 在扩展域每个点的值。
 /// 示例：由于扩展域是 coset，这些值都不应为 0。
@@ -764,6 +828,7 @@ fn compute_quotient_evaluations(
     numerator_evaluations: &[Fr],
     vanishing_evaluations: &[Fr],
 ) -> Result<Vec<Fr>> {
+    // Paper mapping: T(X) = numerator(X) / Z_H(X) as pointwise division on the extended domain.
     ensure(
         numerator_evaluations.len() == vanishing_evaluations.len(),
         "numerator and vanishing evaluations must have the same length",

@@ -44,6 +44,7 @@ pub fn compute_grand_product_evaluations(
     beta: Fr,
     gamma: Fr,
 ) -> Result<GrandProductEvaluations> {
+    // Paper mapping: Prover Round 2, build Z from the permutation recurrence.
     validate_inputs(a_eval, b_eval, c_eval, sigma)?;
     let domain_size = a_eval.len();
     let domain = build_domain_from_size(domain_size)?;
@@ -91,6 +92,7 @@ pub fn verify_single_grand_product_step(
     next_z: Fr,
     terms: &RowTerms,
 ) -> Result<bool> {
+    // Paper mapping: one recurrence step Z(next) = Z(cur) * numerator / denominator.
     let denominator_inverse = terms
         .denominator
         .inverse()
@@ -112,6 +114,7 @@ pub fn verify_grand_product_recurrence(
     beta: Fr,
     gamma: Fr,
 ) -> Result<bool> {
+    // Paper mapping: verifier-style check of the same Round 2 recurrence before quotient aggregation.
     validate_inputs(a_eval, b_eval, c_eval, sigma)?;
     let domain_size = a_eval.len();
     ensure(
@@ -146,6 +149,7 @@ pub fn verify_grand_product_recurrence(
 /// 输出：`bool`。
 /// 示例：正确 copy 关系下应满足 `Z(1)=1` 且 `Z(omega^n)=1`。
 pub fn verify_grand_product_boundary(z_eval: &[Fr], domain_size: usize) -> Result<bool> {
+    // Paper mapping: permutation boundary checks Z(1)=1 and Z(omega^n)=1.
     ensure(
         z_eval.len() == domain_size + 1,
         "grand product evaluations length must equal n + 1",
@@ -162,6 +166,7 @@ pub fn interpolate_grand_product_evaluations(
     z_eval: &[Fr],
     domain_size: usize,
 ) -> Result<DensePolynomial<Fr>> {
+    // Paper mapping: recover the degree-<n polynomial Z(X) from its canonical H evaluations.
     ensure(
         z_eval.len() == domain_size + 1,
         "grand product evaluations length must equal n + 1",
@@ -199,6 +204,7 @@ pub fn compute_row_terms_for_quotient(
     beta: Fr,
     gamma: Fr,
 ) -> Result<RowTerms> {
+    // Paper mapping: expose the row numerator/denominator factors reused inside the quotient identity.
     row_terms(
         domain, sigma, row_index, a_value, b_value, c_value, beta, gamma,
     )
@@ -212,6 +218,7 @@ pub(crate) fn compute_sigma_tag_evaluations_for_quotient(
     domain: &PlonkDomain,
     sigma: &SigmaMapping,
 ) -> Result<SigmaTagEvaluations> {
+    // Paper mapping: sigma-image tags corresponding to the quotient's S_sigma1/S_sigma2/S_sigma3 values.
     validate_sigma_bijection(sigma)?;
     ensure(
         sigma.domain_size() == domain.size(),
@@ -273,6 +280,7 @@ fn row_terms(
     beta: Fr,
     gamma: Fr,
 ) -> Result<RowTerms> {
+    // Paper mapping: the per-row products that appear in both the grand product and quotient formulas.
     let row_label = domain.element(row_index);
     let one = Fr::from(1u64);
     let k1 = Fr::from(K1);
@@ -309,6 +317,7 @@ fn sigma_target_tag(
     source_column: Column,
     source_row: usize,
 ) -> Result<Fr> {
+    // Paper mapping: convert one sigma target position into its tagged field element k_j * omega^i.
     let source_id = pos_to_wire_id(
         Pos {
             col: source_column,
