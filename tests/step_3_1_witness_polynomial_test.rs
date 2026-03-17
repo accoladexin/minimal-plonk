@@ -9,7 +9,7 @@ use minimal_plonk::{
     curve::Fr,
     domain::{build_domain_from_size, polynomial_to_evaluations},
     error::PlonkError,
-    witness::{interpolate_witness_column_polynomials, WitnessColumns},
+    witness::{WitnessColumns, interpolate_witness_column_polynomials},
 };
 
 /// 构造一个顺序明确的测试电路，并完成 pad。
@@ -108,7 +108,12 @@ fn witness_evaluation_order_matches_row_order() {
 
     assert_eq!(
         columns.wire_a_evaluations,
-        vec![Fr::from(11u64), Fr::from(22u64), Fr::from(33u64), Fr::from(0u64)]
+        vec![
+            Fr::from(11u64),
+            Fr::from(22u64),
+            Fr::from(33u64),
+            Fr::from(0u64)
+        ]
     );
     assert_eq!(
         columns.wire_b_evaluations,
@@ -138,15 +143,15 @@ fn interpolation_round_trip_matches_original_witness_evaluations() {
     let columns = WitnessColumns::from_padded_circuit(&circuit).expect("extraction should succeed");
     let domain = build_domain_from_size(columns.domain_size()).expect("domain should build");
 
-    let polynomials =
-        interpolate_witness_column_polynomials(&domain, &columns).expect("interpolation should work");
+    let polynomials = interpolate_witness_column_polynomials(&domain, &columns)
+        .expect("interpolation should work");
 
-    let a_back =
-        polynomial_to_evaluations(&domain, &polynomials.wire_a_poly).expect("evaluation should work");
-    let b_back =
-        polynomial_to_evaluations(&domain, &polynomials.wire_b_poly).expect("evaluation should work");
-    let c_back =
-        polynomial_to_evaluations(&domain, &polynomials.wire_c_poly).expect("evaluation should work");
+    let a_back = polynomial_to_evaluations(&domain, &polynomials.wire_a_poly)
+        .expect("evaluation should work");
+    let b_back = polynomial_to_evaluations(&domain, &polynomials.wire_b_poly)
+        .expect("evaluation should work");
+    let c_back = polynomial_to_evaluations(&domain, &polynomials.wire_c_poly)
+        .expect("evaluation should work");
 
     assert_eq!(a_back, columns.wire_a_evaluations);
     assert_eq!(b_back, columns.wire_b_evaluations);

@@ -9,5 +9,5 @@ pub mod interpolate;
 
 pub use columns::WitnessColumns;
 pub use interpolate::{
-    interpolate_column_evaluations, interpolate_witness_column_polynomials, WitnessPolynomials,
+    WitnessPolynomials, interpolate_column_evaluations, interpolate_witness_column_polynomials,
 };

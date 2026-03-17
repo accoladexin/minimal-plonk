@@ -3,8 +3,8 @@
 //! - 错误 wiring / 坏 sigma 应失败
 
 use minimal_plonk::permutation::{
-    build_sigma_from_copy_constraints, pos_to_wire_id, validate_sigma_bijection, Column,
-    CopyConstraint, Pos, SigmaMapping,
+    Column, CopyConstraint, Pos, SigmaMapping, build_sigma_from_copy_constraints, pos_to_wire_id,
+    validate_sigma_bijection,
 };
 
 /// 正确 wiring：包含单元素 cycle、多元素 cycle 和 fixed point 的混合场景。

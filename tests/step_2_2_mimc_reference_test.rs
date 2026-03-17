@@ -2,7 +2,7 @@
 
 use minimal_plonk::{
     curve::Fr,
-    mimc::{constants::default_round_constants, mimc_feistel, mimc_feistel_trace, MAX_ROUNDS},
+    mimc::{MAX_ROUNDS, constants::default_round_constants, mimc_feistel, mimc_feistel_trace},
 };
 
 /// 相同输入与轮数应当给出确定性输出。

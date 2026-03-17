@@ -8,8 +8,8 @@ use minimal_plonk::{
     curve::{Fr, G1},
     transcript::Transcript,
     types::{
-        Commitment, DomainParams, EvaluationsAtZeta, OpeningProof, PlonkConfig, PlonkProof,
-        TranscriptHash,
+        Commitment, DomainParams, EvaluationsAtZeta, OpeningCommitments, PlonkConfig, PlonkProof,
+        QuotientChunkCommitments, ShiftedEvaluations, TranscriptHash,
     },
 };
 
@@ -29,7 +29,7 @@ fn sample_commitment(multiplier: u64) -> Commitment {
     Commitment::from_projective(point)
 }
 
-/// Builds a minimal Step 7.1 proof for round-trip tests.
+/// Builds a minimal Phase 9 proof for round-trip tests.
 fn sample_proof() -> PlonkProof {
     PlonkProof::new(
         [
@@ -38,8 +38,12 @@ fn sample_proof() -> PlonkProof {
             sample_commitment(3),
         ],
         sample_commitment(4),
-        sample_commitment(5),
-        vec![Fr::from(3u64), Fr::from(5u64)],
+        QuotientChunkCommitments::new(
+            sample_commitment(5),
+            sample_commitment(6),
+            sample_commitment(7),
+        ),
+        OpeningCommitments::new(sample_commitment(8), sample_commitment(9)),
         EvaluationsAtZeta::new(
             Fr::from(8u64),
             Fr::from(13u64),
@@ -47,9 +51,7 @@ fn sample_proof() -> PlonkProof {
             Fr::from(34u64),
             Fr::from(55u64),
         ),
-        minimal_plonk::types::ShiftedEvaluations::new(Fr::from(89u64)),
-        OpeningProof::new(sample_commitment(6)),
-        OpeningProof::new(sample_commitment(7)),
+        ShiftedEvaluations::new(Fr::from(89u64)),
     )
 }
 

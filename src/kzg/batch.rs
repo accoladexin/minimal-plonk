@@ -78,20 +78,14 @@ pub fn verify_polynomials_at_same_point(
     let aggregated_commitment = aggregate_commitments(commitments, aggregation_challenge);
     let aggregated_value = aggregate_values(values, aggregation_challenge);
 
-    verify_opening(
-        &aggregated_commitment,
-        point,
-        aggregated_value,
-        proof,
-        srs,
-    )
+    verify_opening(&aggregated_commitment, point, aggregated_value, proof, srs)
 }
 
 /// Function: aggregate polynomials with fixed input-slice order.
 /// Input: polynomial slice and challenge `v`.
 /// Output: `sum_i v^i * p_i(X)`.
 /// Example: for `[p0, p1, p2]`, result is `p0 + v*p1 + v^2*p2`.
-fn aggregate_polynomials(
+pub fn aggregate_polynomials(
     polynomials: &[DensePolynomial<Fr>],
     aggregation_challenge: Fr,
 ) -> DensePolynomial<Fr> {
@@ -110,7 +104,7 @@ fn aggregate_polynomials(
 /// Input: commitment slice and challenge `v`.
 /// Output: `sum_i v^i * C_i`.
 /// Example: order is exactly the input slice order.
-fn aggregate_commitments(commitments: &[Commitment], aggregation_challenge: Fr) -> Commitment {
+pub fn aggregate_commitments(commitments: &[Commitment], aggregation_challenge: Fr) -> Commitment {
     // Paper mapping: commitment-side image of the same batch opening aggregation.
     let mut aggregated = G1::zero();
     let mut weight = Fr::from(1u64);
@@ -128,7 +122,7 @@ fn aggregate_commitments(commitments: &[Commitment], aggregation_challenge: Fr) 
 /// Input: value slice and challenge `v`.
 /// Output: `sum_i v^i * y_i`.
 /// Example: order is exactly the input slice order.
-fn aggregate_values(values: &[Fr], aggregation_challenge: Fr) -> Fr {
+pub fn aggregate_values(values: &[Fr], aggregation_challenge: Fr) -> Fr {
     // Paper mapping: evaluation-side image of the same batch opening aggregation.
     let mut aggregated = Fr::zero();
     let mut weight = Fr::from(1u64);

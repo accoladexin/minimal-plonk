@@ -4,14 +4,14 @@
 
 use crate::{
     cs::{
-        builtin_gates::{enforce_add, enforce_linear, enforce_mul},
         Circuit,
+        builtin_gates::{enforce_add, enforce_linear, enforce_mul},
     },
     curve::Fr,
     error::Result,
     mimc::{
         constants::default_round_constants,
-        reference::{mimc_feistel_trace, FeistelRoundTrace},
+        reference::{FeistelRoundTrace, mimc_feistel_trace},
     },
 };
 

@@ -5,23 +5,13 @@
 //! - 内部只调用 `Circuit::add_gate_with_tag`
 //! - 不引入 wiring、copy constraints 或 DSL 逻辑
 
-use crate::{
-    cs::Circuit,
-    curve::Fr,
-    error::Result,
-};
+use crate::{cs::Circuit, curve::Fr, error::Result};
 
 /// 功能说明：添加乘法约束 `a * b - c = 0`。
 /// 输入：电路、一行 witness 值和可选标签。
 /// 输出：成功返回 `Ok(())`，若电路已冻结则返回错误。
 /// 示例：`enforce_mul(&mut circuit, 3.into(), 4.into(), 12.into(), None)?;`
-pub fn enforce_mul(
-    circuit: &mut Circuit,
-    a: Fr,
-    b: Fr,
-    c: Fr,
-    tag: Option<String>,
-) -> Result<()> {
+pub fn enforce_mul(circuit: &mut Circuit, a: Fr, b: Fr, c: Fr, tag: Option<String>) -> Result<()> {
     let zero = Fr::from(0u64);
     let one = Fr::from(1u64);
     let neg_one = -one;
@@ -32,13 +22,7 @@ pub fn enforce_mul(
 /// 输入：电路、一行 witness 值和可选标签。
 /// 输出：成功返回 `Ok(())`，若电路已冻结则返回错误。
 /// 示例：`enforce_add(&mut circuit, 2.into(), 5.into(), 7.into(), None)?;`
-pub fn enforce_add(
-    circuit: &mut Circuit,
-    a: Fr,
-    b: Fr,
-    c: Fr,
-    tag: Option<String>,
-) -> Result<()> {
+pub fn enforce_add(circuit: &mut Circuit, a: Fr, b: Fr, c: Fr, tag: Option<String>) -> Result<()> {
     let zero = Fr::from(0u64);
     let one = Fr::from(1u64);
     let neg_one = -one;

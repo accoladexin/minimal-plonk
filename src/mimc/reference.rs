@@ -4,11 +4,7 @@
 //! - 这个文件不涉及电路约束
 //! - 所有 Step 2.2 验收以此实现为 oracle
 
-use crate::{
-    curve::Fr,
-    error::Result,
-    mimc::constants::default_round_constants,
-};
+use crate::{curve::Fr, error::Result, mimc::constants::default_round_constants};
 
 /// MiMC-Feistel 单轮的完整中间值（用于电路 witness 构造）。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -31,10 +27,7 @@ pub fn mimc_feistel(input: Fr, rounds: usize) -> Result<Fr> {
     // 执行 Feistel 计算并获取完整 trace
     let trace = mimc_feistel_trace(input, &constants);
     // 返回最后的结果
-    Ok(trace
-        .last()
-        .map(|round| round.left_out)
-        .unwrap_or(input))
+    Ok(trace.last().map(|round| round.left_out).unwrap_or(input))
 }
 
 /// 使用给定常数执行 MiMC-Feistel，并返回每一轮中间值。

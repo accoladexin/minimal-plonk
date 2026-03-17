@@ -6,7 +6,6 @@
 pub use crate::curve::{Fr, G1, G1Affine, G2, G2Affine};
 pub use crate::error::{PlonkError, Result as PlonkResult};
 pub use crate::types::{
-    Commitment, DomainParams, OpeningProof, PlonkConfig, PlonkProof, ProofSkeleton,
-    TranscriptHash,
+    Commitment, DomainParams, OpeningProof, PlonkConfig, PlonkProof, ProofSkeleton, TranscriptHash,
 };
 pub use crate::validate::ensure;

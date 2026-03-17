@@ -4,10 +4,10 @@
 //! - 只做 evals -> poly（IFFT）纯函数
 //! - 不引入任何电路数据提取逻辑
 
-use ark_poly::{univariate::DensePolynomial, EvaluationDomain};
+use ark_poly::{EvaluationDomain, univariate::DensePolynomial};
 
 use crate::{
-    domain::{evaluations_to_polynomial, PlonkDomain},
+    domain::{PlonkDomain, evaluations_to_polynomial},
     error::{PlonkError, Result},
     witness::columns::WitnessColumns,
 };

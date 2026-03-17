@@ -16,7 +16,8 @@ fn lagrange_values_vector_is_well_formed() {
     // println!("domain size: {}, log_size: {}, generator: {:?}\n", domain.size(), domain.log_size_of_group(), domain.group_gen());
     let point = Fr::from(11u64);
     // println!("evaluating lagrange basis at point: {:?}\n", point);
-    let values = lagrange_values_at_point(&domain, point);    println!("lagrange values at point: {:?}\n", values);
+    let values = lagrange_values_at_point(&domain, point);
+    println!("lagrange values at point: {:?}\n", values);
     assert_eq!(values.len(), domain.size());
 
     let sum = values

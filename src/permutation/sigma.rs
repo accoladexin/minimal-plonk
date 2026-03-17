@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use crate::{
     error::{PlonkError, Result},
-    permutation::position::{pos_to_wire_id, Pos, WireId},
+    permutation::position::{Pos, WireId, pos_to_wire_id},
     validate::ensure,
 };
 

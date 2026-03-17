@@ -31,7 +31,7 @@ impl Column {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Pos {
     pub col: Column, // 列标识
-    pub row: usize, // 行索引
+    pub row: usize,  // 行索引
 }
 
 /// Step 4.1 使用的 wire 唯一 ID 类型。

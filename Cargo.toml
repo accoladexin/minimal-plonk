@@ -12,17 +12,28 @@ ark-bn254 = { version = "0.4", optional = true }
 ark-bls12-381 = { version = "0.4", optional = true }
 ark-std = "0.4"
 ark-serialize = { version = "0.4", features = ["derive"] }
-
 blake2 = "0.10"
 merlin = "3"
 rand = "0.8"
 sha2 = "0.10"
 thiserror = "1"
 
-[features]
-# 默认曲线：BN254（与 memory-bank/tech-stack.md 对齐）
-default = ["bn254"]
+[dev-dependencies]
+criterion = "0.5"
 
-# 曲线切换：只启用其中一个 feature。
+[features]
+default = ["bn254"]
 bn254 = ["dep:ark-bn254"]
 bls12_381 = ["dep:ark-bls12-381"]
+
+[[bench]]
+name = "micro_fft"
+harness = false
+
+[[bench]]
+name = "micro_kzg"
+harness = false
+
+[[bench]]
+name = "micro_pairing"
+harness = false

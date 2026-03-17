@@ -9,8 +9,8 @@ use minimal_plonk::{
     cs::{Circuit, SelectorColumns},
     curve::Fr,
     permutation::{
-        build_sigma_from_copy_constraints, compute_grand_product_evaluations, Column,
-        CopyConstraint, Pos,
+        Column, CopyConstraint, Pos, build_sigma_from_copy_constraints,
+        compute_grand_product_evaluations,
     },
     types::QuotientInputs,
     witness::WitnessColumns,
@@ -109,14 +109,8 @@ fn grand_product_supports_domain_size_one() {
 #[test]
 fn empty_witness_is_rejected() {
     let sigma = build_sigma_from_copy_constraints(1, &[]).expect("identity sigma should build");
-    let result = compute_grand_product_evaluations(
-        &[],
-        &[],
-        &[],
-        &sigma,
-        Fr::from(5u64),
-        Fr::from(9u64),
-    );
+    let result =
+        compute_grand_product_evaluations(&[], &[], &[], &sigma, Fr::from(5u64), Fr::from(9u64));
     assert!(result.is_err());
 }
 
@@ -226,9 +220,8 @@ fn quotient_inputs_smoke_test() {
     )
     .expect("grand product should compute");
 
-    let inputs =
-        QuotientInputs::new(witness.clone(), selectors.clone(), sigma.clone(), z.clone())
-            .expect("quotient inputs should build");
+    let inputs = QuotientInputs::new(witness.clone(), selectors.clone(), sigma.clone(), z.clone())
+        .expect("quotient inputs should build");
 
     assert_eq!(inputs.domain_size, 4);
     assert_eq!(inputs.witness_columns, witness);

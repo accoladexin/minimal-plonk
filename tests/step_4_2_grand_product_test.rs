@@ -7,17 +7,32 @@ use minimal_plonk::{
     curve::Fr,
     domain::{build_domain_from_size, polynomial_to_evaluations},
     permutation::{
-        build_sigma_from_copy_constraints, compute_grand_product_evaluations,
-        interpolate_grand_product_evaluations, verify_grand_product_boundary,
-        verify_grand_product_recurrence, Column, CopyConstraint, Pos,
+        Column, CopyConstraint, Pos, build_sigma_from_copy_constraints,
+        compute_grand_product_evaluations, interpolate_grand_product_evaluations,
+        verify_grand_product_boundary, verify_grand_product_recurrence,
     },
 };
 
 #[test]
 fn fixed_point_sigma_produces_all_one_z_and_closing_value() {
-    let a_eval = vec![Fr::from(1u64), Fr::from(2u64), Fr::from(3u64), Fr::from(4u64)];
-    let b_eval = vec![Fr::from(5u64), Fr::from(6u64), Fr::from(7u64), Fr::from(8u64)];
-    let c_eval = vec![Fr::from(9u64), Fr::from(10u64), Fr::from(11u64), Fr::from(12u64)];
+    let a_eval = vec![
+        Fr::from(1u64),
+        Fr::from(2u64),
+        Fr::from(3u64),
+        Fr::from(4u64),
+    ];
+    let b_eval = vec![
+        Fr::from(5u64),
+        Fr::from(6u64),
+        Fr::from(7u64),
+        Fr::from(8u64),
+    ];
+    let c_eval = vec![
+        Fr::from(9u64),
+        Fr::from(10u64),
+        Fr::from(11u64),
+        Fr::from(12u64),
+    ];
     let sigma = build_sigma_from_copy_constraints(4, &[]).expect("identity sigma should build");
 
     let z = compute_grand_product_evaluations(
@@ -54,9 +69,24 @@ fn fixed_point_sigma_produces_all_one_z_and_closing_value() {
 
 #[test]
 fn nontrivial_copy_cycle_passes_recurrence_and_boundary() {
-    let mut a_eval = vec![Fr::from(11u64), Fr::from(2u64), Fr::from(3u64), Fr::from(4u64)];
-    let mut b_eval = vec![Fr::from(5u64), Fr::from(11u64), Fr::from(7u64), Fr::from(8u64)];
-    let mut c_eval = vec![Fr::from(9u64), Fr::from(10u64), Fr::from(11u64), Fr::from(12u64)];
+    let mut a_eval = vec![
+        Fr::from(11u64),
+        Fr::from(2u64),
+        Fr::from(3u64),
+        Fr::from(4u64),
+    ];
+    let mut b_eval = vec![
+        Fr::from(5u64),
+        Fr::from(11u64),
+        Fr::from(7u64),
+        Fr::from(8u64),
+    ];
+    let mut c_eval = vec![
+        Fr::from(9u64),
+        Fr::from(10u64),
+        Fr::from(11u64),
+        Fr::from(12u64),
+    ];
     a_eval[0] = Fr::from(31u64);
     b_eval[1] = Fr::from(31u64);
     c_eval[2] = Fr::from(31u64);
@@ -117,9 +147,24 @@ fn nontrivial_copy_cycle_passes_recurrence_and_boundary() {
 
 #[test]
 fn broken_copy_value_fails_boundary_check() {
-    let a_eval = vec![Fr::from(31u64), Fr::from(2u64), Fr::from(3u64), Fr::from(4u64)];
-    let mut b_eval = vec![Fr::from(5u64), Fr::from(31u64), Fr::from(7u64), Fr::from(8u64)];
-    let c_eval = vec![Fr::from(9u64), Fr::from(10u64), Fr::from(31u64), Fr::from(12u64)];
+    let a_eval = vec![
+        Fr::from(31u64),
+        Fr::from(2u64),
+        Fr::from(3u64),
+        Fr::from(4u64),
+    ];
+    let mut b_eval = vec![
+        Fr::from(5u64),
+        Fr::from(31u64),
+        Fr::from(7u64),
+        Fr::from(8u64),
+    ];
+    let c_eval = vec![
+        Fr::from(9u64),
+        Fr::from(10u64),
+        Fr::from(31u64),
+        Fr::from(12u64),
+    ];
 
     let constraints = vec![
         CopyConstraint {
@@ -173,9 +218,24 @@ fn broken_copy_value_fails_boundary_check() {
 
 #[test]
 fn wrong_but_still_bijective_sigma_fails_row_recurrence_against_valid_z() {
-    let a_eval = vec![Fr::from(31u64), Fr::from(2u64), Fr::from(3u64), Fr::from(4u64)];
-    let b_eval = vec![Fr::from(5u64), Fr::from(31u64), Fr::from(7u64), Fr::from(8u64)];
-    let c_eval = vec![Fr::from(9u64), Fr::from(10u64), Fr::from(31u64), Fr::from(12u64)];
+    let a_eval = vec![
+        Fr::from(31u64),
+        Fr::from(2u64),
+        Fr::from(3u64),
+        Fr::from(4u64),
+    ];
+    let b_eval = vec![
+        Fr::from(5u64),
+        Fr::from(31u64),
+        Fr::from(7u64),
+        Fr::from(8u64),
+    ];
+    let c_eval = vec![
+        Fr::from(9u64),
+        Fr::from(10u64),
+        Fr::from(31u64),
+        Fr::from(12u64),
+    ];
 
     let constraints = vec![
         CopyConstraint {
@@ -239,9 +299,24 @@ fn wrong_but_still_bijective_sigma_fails_row_recurrence_against_valid_z() {
 
 #[test]
 fn denominator_zero_is_reported_explicitly() {
-    let a_eval = vec![Fr::from(0u64), Fr::from(2u64), Fr::from(3u64), Fr::from(4u64)];
-    let b_eval = vec![Fr::from(5u64), Fr::from(6u64), Fr::from(7u64), Fr::from(8u64)];
-    let c_eval = vec![Fr::from(9u64), Fr::from(10u64), Fr::from(11u64), Fr::from(12u64)];
+    let a_eval = vec![
+        Fr::from(0u64),
+        Fr::from(2u64),
+        Fr::from(3u64),
+        Fr::from(4u64),
+    ];
+    let b_eval = vec![
+        Fr::from(5u64),
+        Fr::from(6u64),
+        Fr::from(7u64),
+        Fr::from(8u64),
+    ];
+    let c_eval = vec![
+        Fr::from(9u64),
+        Fr::from(10u64),
+        Fr::from(11u64),
+        Fr::from(12u64),
+    ];
     let sigma = build_sigma_from_copy_constraints(4, &[]).expect("identity sigma should build");
 
     let result = compute_grand_product_evaluations(
@@ -257,9 +332,24 @@ fn denominator_zero_is_reported_explicitly() {
 
 #[test]
 fn interpolation_uses_prefix_n_points_only() {
-    let a_eval = vec![Fr::from(1u64), Fr::from(2u64), Fr::from(3u64), Fr::from(4u64)];
-    let b_eval = vec![Fr::from(5u64), Fr::from(6u64), Fr::from(7u64), Fr::from(8u64)];
-    let c_eval = vec![Fr::from(9u64), Fr::from(10u64), Fr::from(11u64), Fr::from(12u64)];
+    let a_eval = vec![
+        Fr::from(1u64),
+        Fr::from(2u64),
+        Fr::from(3u64),
+        Fr::from(4u64),
+    ];
+    let b_eval = vec![
+        Fr::from(5u64),
+        Fr::from(6u64),
+        Fr::from(7u64),
+        Fr::from(8u64),
+    ];
+    let c_eval = vec![
+        Fr::from(9u64),
+        Fr::from(10u64),
+        Fr::from(11u64),
+        Fr::from(12u64),
+    ];
     let sigma = build_sigma_from_copy_constraints(4, &[]).expect("identity sigma should build");
     let z = compute_grand_product_evaluations(
         &a_eval,

@@ -3,10 +3,7 @@
 //! - 错误 witness 的 gate 约束应失败
 //! - `pad_to_domain` 应补齐到下一个 2^k，并插入零约束行
 
-use minimal_plonk::{
-    cs::Circuit,
-    curve::Fr,
-};
+use minimal_plonk::{cs::Circuit, curve::Fr};
 
 /// 测试单行 gate：`a * b - c = 0` 在正确 witness 下成立。
 #[test]
@@ -27,15 +24,11 @@ fn valid_gate_witness_passes_constraint_check() {
         .expect("adding gate should succeed");
 
     assert_eq!(
-        circuit
-            .gate_constraint_value(0)
-            .expect("row must exist"),
+        circuit.gate_constraint_value(0).expect("row must exist"),
         Fr::from(0u64)
     );
     assert!(
-        circuit
-            .is_gate_satisfied(0)
-            .expect("row must exist"),
+        circuit.is_gate_satisfied(0).expect("row must exist"),
         "row 0 should satisfy gate constraint"
     );
     assert!(circuit.are_all_gates_satisfied());
@@ -61,15 +54,11 @@ fn invalid_gate_witness_fails_constraint_check() {
         .expect("adding gate should succeed");
 
     assert_ne!(
-        circuit
-            .gate_constraint_value(0)
-            .expect("row must exist"),
+        circuit.gate_constraint_value(0).expect("row must exist"),
         Fr::from(0u64)
     );
     assert!(
-        !circuit
-            .is_gate_satisfied(0)
-            .expect("row must exist"),
+        !circuit.is_gate_satisfied(0).expect("row must exist"),
         "row 0 should fail gate constraint"
     );
     assert!(!circuit.are_all_gates_satisfied());

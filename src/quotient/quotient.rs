@@ -18,6 +18,7 @@ use crate::{
     },
     types::QuotientInputs,
     validate::ensure,
+    witness::WitnessPolynomials as BlindedWitnessPolynomials,
 };
 
 /// Step 5.1 在原始 H-domain 上的约束检查输出。
@@ -196,8 +197,7 @@ pub fn compute_h_domain_constraint_evaluations(
     let original_domain = build_domain_from_size(domain_size)?;
     // gate约束
     let gate_term_evaluations = compute_gate_term_evaluations_on_h(inputs)?;
-    let public_input_term_evaluations =
-        build_public_input_evaluations(domain_size, public_inputs)?;
+    let public_input_term_evaluations = build_public_input_evaluations(domain_size, public_inputs)?;
     // permutation约束
     let permutation_term_evaluations =
         compute_permutation_term_evaluations_on_h(inputs, &original_domain, beta, gamma)?;
@@ -325,6 +325,65 @@ pub fn compute_step_5_1(
     })
 }
 
+/// 功能说明：使用 blinded `A/B/C` 与 blinded `Z(X)` 重新构造 prover 真实使用的 quotient polynomial。
+/// 输入：Step 5.1 原始输入、外部 `public_inputs`、挑战、以及 blinded witness / grand-product polynomials。
+/// 输出：与 blinded prover-side objects 一致的 `t(X)`。
+/// 示例：Step 10.2 prover 在生成 blinded chunk commitments 前调用它。
+pub fn compute_blinded_quotient_polynomial(
+    inputs: &QuotientInputs,
+    public_inputs: &[Fr],
+    alpha: Fr,
+    beta: Fr,
+    gamma: Fr,
+    blinded_witness_polynomials: &BlindedWitnessPolynomials,
+    blinded_grand_product_polynomial: &DensePolynomial<Fr>,
+) -> Result<DensePolynomial<Fr>> {
+    // Paper mapping: quotient witness must stay consistent with the blinded prover-side objects.
+    // Repo role: keep the H-domain zero check unchanged, but rebuild the extended-domain quotient
+    // from the blinded witness and grand-product polynomials.
+    let original_domain = build_domain_from_size(inputs.domain_size)?;
+    let extended_domain = build_extended_quotient_domain(inputs.domain_size)?;
+    let mut polynomials = interpolate_step_5_1_polynomials(inputs, public_inputs, &original_domain)?;
+    polynomials.witness_polynomials = WitnessPolynomials {
+        wire_a_polynomial: blinded_witness_polynomials.wire_a_poly.clone(),
+        wire_b_polynomial: blinded_witness_polynomials.wire_b_poly.clone(),
+        wire_c_polynomial: blinded_witness_polynomials.wire_c_poly.clone(),
+    };
+    polynomials.z_polynomial = blinded_grand_product_polynomial.clone();
+
+    let gate_term_evaluations =
+        compute_gate_term_evaluations_on_extended_domain(&polynomials, &extended_domain);
+    let public_input_term_evaluations =
+        extend_poly_to_evals(&polynomials.public_input_polynomial, &extended_domain);
+    let permutation_term_evaluations = compute_permutation_term_evaluations_on_extended_domain(
+        &polynomials,
+        &original_domain,
+        &extended_domain,
+        beta,
+        gamma,
+    );
+    let (boundary_term_1_evaluations, boundary_term_2_evaluations) =
+        compute_boundary_term_evaluations_on_extended_domain(
+            &polynomials,
+            &original_domain,
+            &extended_domain,
+        );
+    let numerator_evaluations = aggregate_numerator_evaluations(
+        &gate_term_evaluations,
+        &public_input_term_evaluations,
+        &permutation_term_evaluations,
+        &boundary_term_1_evaluations,
+        &boundary_term_2_evaluations,
+        alpha,
+    )?;
+    let vanishing_evaluations =
+        evaluate_h_vanishing_on_extended_domain(&original_domain, &extended_domain);
+    let quotient_evaluations =
+        compute_quotient_evaluations(&numerator_evaluations, &vanishing_evaluations)?;
+
+    evaluations_to_polynomial(&extended_domain, &quotient_evaluations)
+}
+
 /// 功能说明：把 Step 5.1 需要的各类 H-domain evaluations 插值成多项式。（IFFT到原始 H 上）
 /// 输入：原始 `QuotientInputs` 与原始 H-domain。
 /// 输出：内部使用的 `Step5_1Polynomials`。
@@ -430,10 +489,7 @@ fn interpolate_step_5_1_polynomials(
 /// 杈撳叆锛歞omain 澶у皬鍜屾寜 statement 椤哄簭鎺掑垪鐨?public inputs銆?///
 /// 杈撳嚭锛氶暱搴︿负 `domain_size` 鐨?evaluations锛屽墠 `m` 涓偣鏄?public inputs锛屽叾浣欑偣涓?0銆?///
 /// 绀轰緥锛氳嫢 `public_inputs = [7, 11]`锛屽垯 `PI(omega^0)=7, PI(omega^1)=11`銆?
-fn build_public_input_evaluations(
-    domain_size: usize,
-    public_inputs: &[Fr],
-) -> Result<Vec<Fr>> {
+fn build_public_input_evaluations(domain_size: usize, public_inputs: &[Fr]) -> Result<Vec<Fr>> {
     // Paper mapping: feeds the statement contribution into the quotient identity.
     // Implementation note: this is the repository's minimal public-input encoding, not a direct paper formula.
     ensure(
@@ -757,11 +813,11 @@ fn compute_boundary_term_evaluations_on_extended_domain(
         let z_at_shifted_x = polynomials.z_polynomial.evaluate(&shifted_point); //z(omega*x)
         let l_0_at_x = polynomials.l_0_polynomial.evaluate(&point); // l_0(x)
         let l_n_minus_1_at_x = polynomials.l_n_minus_1_polynomial.evaluate(&point); // l_{n-1}(x)
+
         //( Z(X) - 1 ) * L_0(X)
         boundary_term_1_evaluations.push((z_at_x - one) * l_0_at_x);
         //约束项 2：( Z(ωX) - 1 ) * L_{n-1}(X)
         boundary_term_2_evaluations.push((z_at_shifted_x - one) * l_n_minus_1_at_x);
-
     }
     (boundary_term_1_evaluations, boundary_term_2_evaluations)
 }
@@ -892,4 +948,264 @@ pub fn is_zero_polynomial(polynomial: &DensePolynomial<Fr>) -> bool {
         .coeffs
         .iter()
         .all(|coefficient| coefficient.is_zero())
+}
+
+/// 鍔熻兘璇存槑锛氭寜褰撳墠浠撳簱鐨?`PI(X)` 璇箟锛岀洿鎺ュ湪涓€鐐逛笂璇勪及 public-input contribution銆?
+/// 杈撳叆锛氬師濮?domain銆佸閮?`public_inputs` 涓庤瘎浼扮偣銆?
+/// 杈撳嚭锛歚PI(point)`銆?
+/// 绀轰緥锛歚evaluate_public_input_polynomial_at_point(domain, public_inputs, zeta)`銆?
+pub fn evaluate_public_input_polynomial_at_point(
+    domain: &PlonkDomain,
+    public_inputs: &[Fr],
+    point: Fr,
+) -> Fr {
+    let lagrange_values = domain.evaluate_all_lagrange_coefficients(point);
+    public_inputs
+        .iter()
+        .enumerate()
+        .fold(Fr::zero(), |accumulator, (index, public_input)| {
+            accumulator + (*public_input * lagrange_values[index])
+        })
+}
+
+/// Phase 9 prover / verifier 使用的 quotient chunk 多项式。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QuotientChunkPolynomials {
+    pub t_lo: DensePolynomial<Fr>,
+    pub t_mid: DensePolynomial<Fr>,
+    pub t_hi: DensePolynomial<Fr>,
+}
+
+/// 功能说明：把完整 `T(X)` 按 Step 9.2 冻结边界切成 `T_lo/T_mid/T_hi`。
+/// 输入：完整 quotient polynomial 与原始 domain 大小 `n`。
+/// 输出：三个 degree `< n` 的 chunk 多项式。
+/// 示例：`split_quotient_polynomial(&t, n)?`。
+pub fn split_quotient_polynomial(
+    quotient_polynomial: &DensePolynomial<Fr>,
+    domain_size: usize,
+) -> Result<QuotientChunkPolynomials> {
+    ensure(domain_size > 0, "domain_size must be positive")?;
+
+    let take_chunk = |chunk_index: usize| {
+        let start = chunk_index * domain_size;
+        let mut coeffs = vec![Fr::zero(); domain_size];
+        for (offset, coefficient) in quotient_polynomial
+            .coeffs
+            .iter()
+            .skip(start)
+            .take(domain_size)
+            .enumerate()
+        {
+            coeffs[offset] = *coefficient;
+        }
+        DensePolynomial::from_coefficients_vec(trim_trailing_zeros(coeffs))
+    };
+
+    Ok(QuotientChunkPolynomials {
+        t_lo: take_chunk(0),
+        t_mid: take_chunk(1),
+        t_hi: take_chunk(2),
+    })
+}
+
+/// 功能说明：给 witness polynomial 添加 `(c0 + c1 * X) * Z_H(X)` 形式的最小 blind。
+/// 输入：原始多项式、原始 domain 大小、两个随机标量。
+/// 输出：在 H 上取值不变、但承诺与随机点 opening 改变后的多项式。
+/// 示例：`blind_witness_polynomial(&a_raw, n, r0, r1)`。
+pub fn blind_witness_polynomial(
+    polynomial: &DensePolynomial<Fr>,
+    domain_size: usize,
+    constant_blinder: Fr,
+    linear_blinder: Fr,
+) -> Result<DensePolynomial<Fr>> {
+    ensure(domain_size > 0, "domain_size must be positive")?;
+
+    let mut coefficients = polynomial.coeffs.clone();
+    coefficients.resize(domain_size + 2, Fr::zero());
+    coefficients[0] -= constant_blinder;
+    coefficients[1] -= linear_blinder;
+    coefficients[domain_size] += constant_blinder;
+    coefficients[domain_size + 1] += linear_blinder;
+
+    Ok(DensePolynomial::from_coefficients_vec(trim_trailing_zeros(
+        coefficients,
+    )))
+}
+
+/// 功能说明：给 grand product polynomial 添加 `r * Z_H(X)` 形式的最小 blind。
+/// 输入：原始 `Z(X)`、原始 domain 大小、一个随机标量。
+/// 输出：在 H 上保持同值的 blinded `Z(X)`。
+/// 示例：`blind_grand_product_polynomial(&z_raw, n, r_z)`。
+pub fn blind_grand_product_polynomial(
+    polynomial: &DensePolynomial<Fr>,
+    domain_size: usize,
+    blinder: Fr,
+) -> Result<DensePolynomial<Fr>> {
+    ensure(domain_size > 0, "domain_size must be positive")?;
+
+    let mut coefficients = polynomial.coeffs.clone();
+    coefficients.resize(domain_size + 1, Fr::zero());
+    coefficients[0] -= blinder;
+    coefficients[domain_size] += blinder;
+
+    Ok(DensePolynomial::from_coefficients_vec(trim_trailing_zeros(
+        coefficients,
+    )))
+}
+
+/// 功能说明：按 Step 10.1 冻结形式对 quotient chunks 做 re-randomization。
+/// 输入：原始 chunks、原始 domain 大小、两个随机标量。
+/// 输出：重组 `t(X)` 不变、但 chunk commitments 改变后的三块多项式。
+/// 示例：`rerandomize_quotient_chunks(&chunks, n, r0, r1)?`。
+pub fn rerandomize_quotient_chunks(
+    quotient_chunks: &QuotientChunkPolynomials,
+    domain_size: usize,
+    first_blinder: Fr,
+    second_blinder: Fr,
+) -> Result<QuotientChunkPolynomials> {
+    ensure(domain_size > 0, "domain_size must be positive")?;
+
+    let mut t_lo_coefficients = quotient_chunks.t_lo.coeffs.clone();
+    t_lo_coefficients.resize(domain_size + 1, Fr::zero());
+    t_lo_coefficients[domain_size] += first_blinder;
+
+    let mut t_mid_coefficients = quotient_chunks.t_mid.coeffs.clone();
+    t_mid_coefficients.resize(domain_size + 1, Fr::zero());
+    t_mid_coefficients[0] -= first_blinder;
+    t_mid_coefficients[domain_size] += second_blinder;
+
+    let mut t_hi_coefficients = quotient_chunks.t_hi.coeffs.clone();
+    if t_hi_coefficients.is_empty() {
+        t_hi_coefficients.push(Fr::zero());
+    }
+    t_hi_coefficients[0] -= second_blinder;
+
+    Ok(QuotientChunkPolynomials {
+        t_lo: DensePolynomial::from_coefficients_vec(trim_trailing_zeros(t_lo_coefficients)),
+        t_mid: DensePolynomial::from_coefficients_vec(trim_trailing_zeros(t_mid_coefficients)),
+        t_hi: DensePolynomial::from_coefficients_vec(trim_trailing_zeros(t_hi_coefficients)),
+    })
+}
+
+/// 功能说明：按 `T_lo + X^n*T_mid + X^(2n)*T_hi` 重组并评估 quotient。
+/// 输入：quotient chunks、domain 大小与评估点。
+/// 输出：`T(point)`。
+/// 示例：`evaluate_chunked_quotient(&chunks, n, zeta)`。
+pub fn evaluate_chunked_quotient(
+    quotient_chunks: &QuotientChunkPolynomials,
+    domain_size: usize,
+    point: Fr,
+) -> Fr {
+    let point_to_n = point.pow([domain_size as u64]);
+    let point_to_2n = point_to_n * point_to_n;
+    quotient_chunks.t_lo.evaluate(&point)
+        + point_to_n * quotient_chunks.t_mid.evaluate(&point)
+        + point_to_2n * quotient_chunks.t_hi.evaluate(&point)
+}
+
+/// 功能说明：构造 prover 在 `zeta` 处使用的 linearization polynomial `r(X)`。
+/// 输入：固定多项式、`Z(X)`、quotient chunks、statement 与挑战/评估值。
+/// 输出：显式可读的 `r(X)`。
+/// 示例：Step 9.3 prover 会在构造 `W_z` 前调用它。
+#[allow(clippy::too_many_arguments)]
+pub fn build_linearization_polynomial(
+    domain: &PlonkDomain,
+    q_l_polynomial: &DensePolynomial<Fr>,
+    q_r_polynomial: &DensePolynomial<Fr>,
+    q_o_polynomial: &DensePolynomial<Fr>,
+    q_m_polynomial: &DensePolynomial<Fr>,
+    q_c_polynomial: &DensePolynomial<Fr>,
+    sigma_3_polynomial: &DensePolynomial<Fr>,
+    grand_product_polynomial: &DensePolynomial<Fr>,
+    quotient_chunks: &QuotientChunkPolynomials,
+    public_inputs: &[Fr],
+    alpha: Fr,
+    beta: Fr,
+    gamma: Fr,
+    zeta: Fr,
+    a_at_zeta: Fr,
+    b_at_zeta: Fr,
+    c_at_zeta: Fr,
+    sigma_1_at_zeta: Fr,
+    sigma_2_at_zeta: Fr,
+    z_at_omega_zeta: Fr,
+) -> DensePolynomial<Fr> {
+    // Paper mapping: this is the prover-side linearization polynomial used before building W_z.
+    let public_input_at_zeta =
+        evaluate_public_input_polynomial_at_point(domain, public_inputs, zeta);
+    let z_h_at_zeta = domain.evaluate_vanishing_polynomial(zeta);
+    let l_0_at_zeta = domain.evaluate_all_lagrange_coefficients(zeta)[0];
+    let point_to_n = zeta.pow([domain.size() as u64]);
+    let point_to_2n = point_to_n * point_to_n;
+
+    let gate_constant = scale_polynomial(q_m_polynomial, a_at_zeta * b_at_zeta)
+        + scale_polynomial(q_l_polynomial, a_at_zeta)
+        + scale_polynomial(q_r_polynomial, b_at_zeta)
+        + scale_polynomial(q_o_polynomial, c_at_zeta)
+        + scale_polynomial(q_c_polynomial, Fr::from(1u64))
+        + DensePolynomial::from_coefficients_vec(vec![public_input_at_zeta]);
+
+    let permutation_scalar = alpha
+        * (a_at_zeta + beta * zeta + gamma)
+        * (b_at_zeta + beta * Fr::from(K1) * zeta + gamma)
+        * (c_at_zeta + beta * Fr::from(K2) * zeta + gamma);
+    let permutation_z_term = scale_polynomial(grand_product_polynomial, permutation_scalar);
+
+    let sigma_scalar = -alpha
+        * (a_at_zeta + beta * sigma_1_at_zeta + gamma)
+        * (b_at_zeta + beta * sigma_2_at_zeta + gamma);
+    let sigma_linear = scale_polynomial(sigma_3_polynomial, beta * sigma_scalar * z_at_omega_zeta);
+    let sigma_constant = DensePolynomial::from_coefficients_vec(vec![
+        (c_at_zeta + gamma) * sigma_scalar * z_at_omega_zeta,
+    ]);
+
+    let boundary_linear = scale_polynomial(grand_product_polynomial, alpha * alpha * l_0_at_zeta);
+    let boundary_constant =
+        DensePolynomial::from_coefficients_vec(vec![-alpha * alpha * l_0_at_zeta]);
+
+    let quotient_reconstruction = quotient_chunks.t_lo.clone()
+        + scale_polynomial(&quotient_chunks.t_mid, point_to_n)
+        + scale_polynomial(&quotient_chunks.t_hi, point_to_2n);
+    let quotient_term = scale_polynomial(&quotient_reconstruction, -z_h_at_zeta);
+
+    gate_constant
+        + permutation_z_term
+        + boundary_linear
+        + sigma_linear
+        + sigma_constant
+        + boundary_constant
+        + quotient_term
+}
+
+/// 功能说明：去掉系数向量尾部的 0，避免把 chunk 人为扩成高次零多项式。
+/// 输入：一个系数向量。
+/// 输出：裁剪后的系数向量；全零时保留一个 0。
+/// 示例：`trim_trailing_zeros(vec![1, 0, 0])`。
+fn trim_trailing_zeros(mut coefficients: Vec<Fr>) -> Vec<Fr> {
+    while coefficients.len() > 1
+        && coefficients
+            .last()
+            .is_some_and(|coefficient| coefficient.is_zero())
+    {
+        coefficients.pop();
+    }
+    coefficients
+}
+
+/// 功能说明：把多项式整体乘以一个标量。
+/// 输入：多项式与标量。
+/// 输出：缩放后的多项式。
+/// 示例：`scale_polynomial(poly, alpha)`。
+fn scale_polynomial(polynomial: &DensePolynomial<Fr>, scalar: Fr) -> DensePolynomial<Fr> {
+    if scalar.is_zero() {
+        return DensePolynomial::zero();
+    }
+
+    DensePolynomial::from_coefficients_vec(
+        polynomial
+            .coeffs
+            .iter()
+            .map(|coefficient| *coefficient * scalar)
+            .collect(),
+    )
 }

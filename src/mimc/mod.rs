@@ -9,7 +9,7 @@ pub mod constants;
 pub mod reference;
 
 pub use circuit::{
-    build_mimc_feistel_circuit, build_mimc_feistel_circuit_from_trace, MimcCircuitBuild,
+    MimcCircuitBuild, build_mimc_feistel_circuit, build_mimc_feistel_circuit_from_trace,
 };
-pub use constants::{default_round_constants, DEFAULT_ROUNDS, MAX_ROUNDS};
-pub use reference::{mimc_feistel, mimc_feistel_trace, FeistelRoundTrace};
+pub use constants::{DEFAULT_ROUNDS, MAX_ROUNDS, default_round_constants};
+pub use reference::{FeistelRoundTrace, mimc_feistel, mimc_feistel_trace};

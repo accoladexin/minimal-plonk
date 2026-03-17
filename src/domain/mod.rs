@@ -9,5 +9,7 @@ pub mod vanishing;
 
 pub use fft::{evaluations_to_polynomial, fft, ifft, polynomial_to_evaluations};
 pub use lagrange::{lagrange_basis_value, lagrange_values_at_point};
-pub use radix2_domain::{build_domain_from_log_size, build_domain_from_size, domain_params, PlonkDomain};
+pub use radix2_domain::{
+    PlonkDomain, build_domain_from_log_size, build_domain_from_size, domain_params,
+};
 pub use vanishing::vanishing_value;

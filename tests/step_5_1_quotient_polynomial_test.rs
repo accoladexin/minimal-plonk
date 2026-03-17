@@ -396,9 +396,14 @@ fn extended_quotient_domain_uses_next_power_of_two_of_four_n() {
 #[test]
 fn extended_domain_quotient_recomposes_numerator_polynomial() {
     let inputs = build_valid_inputs();
-    let output =
-        compute_extended_domain_quotient(&inputs, &[], sample_alpha(), sample_beta(), sample_gamma())
-            .expect("extended-domain quotient should compute");
+    let output = compute_extended_domain_quotient(
+        &inputs,
+        &[],
+        sample_alpha(),
+        sample_beta(),
+        sample_gamma(),
+    )
+    .expect("extended-domain quotient should compute");
 
     let vanishing_polynomial = build_h_vanishing_polynomial(output.original_domain_size);
     let recomposed = &output.quotient_polynomial * &vanishing_polynomial;
@@ -412,9 +417,14 @@ fn extended_domain_quotient_recomposes_numerator_polynomial() {
 #[test]
 fn extended_domain_pointwise_division_matches_numerator() {
     let inputs = build_valid_inputs();
-    let output =
-        compute_extended_domain_quotient(&inputs, &[], sample_alpha(), sample_beta(), sample_gamma())
-            .expect("extended-domain quotient should compute");
+    let output = compute_extended_domain_quotient(
+        &inputs,
+        &[],
+        sample_alpha(),
+        sample_beta(),
+        sample_gamma(),
+    )
+    .expect("extended-domain quotient should compute");
 
     for index in 0..output.extended_domain_size {
         assert_eq!(

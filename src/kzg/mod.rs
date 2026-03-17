@@ -8,8 +8,11 @@ pub mod open;
 pub mod srs;
 pub mod verify;
 
-pub use batch::{KzgBatchOpening, open_polynomials_at_same_point, verify_polynomials_at_same_point};
+pub use batch::{
+    KzgBatchOpening, aggregate_commitments, aggregate_polynomials, aggregate_values,
+    open_polynomials_at_same_point, verify_polynomials_at_same_point,
+};
 pub use commit::commit_polynomial;
-pub use open::{KzgOpening, KzgOpeningProof, open_polynomial_at_point};
+pub use open::{KzgOpening, KzgOpeningProof, build_witness_polynomial, open_polynomial_at_point};
 pub use srs::KzgSrs;
 pub use verify::verify_opening;

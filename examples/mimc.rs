@@ -5,7 +5,7 @@
 
 use minimal_plonk::{
     curve::Fr,
-    mimc::{build_mimc_feistel_circuit, mimc_feistel, DEFAULT_ROUNDS},
+    mimc::{DEFAULT_ROUNDS, build_mimc_feistel_circuit, mimc_feistel},
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

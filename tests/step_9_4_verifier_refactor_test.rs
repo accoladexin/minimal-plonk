@@ -1,4 +1,4 @@
-//! Step 8.2 compatibility tests after the Step 9.4 verifier refactor.
+//! Step 9.4 acceptance tests for the paper-aligned verifier refactor.
 
 use ark_poly::EvaluationDomain;
 
@@ -7,7 +7,6 @@ use minimal_plonk::{
     curve::Fr,
     domain::{PlonkDomain, build_domain_from_size, domain_params},
     kzg::KzgSrs,
-    mimc::build_mimc_feistel_circuit,
     permutation::{Column, CopyConstraint, Pos, SigmaMapping, build_sigma_from_copy_constraints},
     prover::prove,
     types::{
@@ -24,10 +23,9 @@ struct VerifierFixture {
     srs: KzgSrs,
 }
 
-fn build_public_input_copy_circuit(
-    left_public_input: Fr,
-    right_public_input: Fr,
-) -> (Circuit, Vec<CopyConstraint>, Vec<Fr>) {
+fn build_public_input_copy_circuit() -> (Circuit, Vec<CopyConstraint>, Vec<Fr>) {
+    let left_public_input = Fr::from(5u64);
+    let right_public_input = Fr::from(9u64);
     let public_inputs = vec![left_public_input, right_public_input];
     let sum = left_public_input + right_public_input;
     let mut circuit = Circuit::new();
@@ -152,7 +150,6 @@ fn build_verifier_input(
         interpolate_column_evaluations(&domain, &selectors.q_m_evaluations).unwrap(),
         interpolate_column_evaluations(&domain, &selectors.q_c_evaluations).unwrap(),
     );
-
     let sigma_mapping = build_sigma_from_copy_constraints(domain_size, copy_constraints).unwrap();
     let (sigma_a, sigma_b, sigma_c) = build_sigma_tag_evaluations(&domain, &sigma_mapping);
     let sigma_tag_polynomials = SigmaTagPolynomials::new(
@@ -170,8 +167,7 @@ fn build_verifier_input(
 }
 
 fn sample_fixture() -> VerifierFixture {
-    let (circuit, copy_constraints, public_inputs) =
-        build_public_input_copy_circuit(Fr::from(5u64), Fr::from(9u64));
+    let (circuit, copy_constraints, public_inputs) = build_public_input_copy_circuit();
     let srs = sample_srs(circuit.domain_size().unwrap());
     let proof = prove(&circuit, &copy_constraints, public_inputs.clone(), &srs).unwrap();
     let verifier_input = build_verifier_input(&circuit, &copy_constraints);
@@ -184,7 +180,7 @@ fn sample_fixture() -> VerifierFixture {
 }
 
 #[test]
-fn verifier_accepts_valid_phase_9_fixture() {
+fn verifier_accepts_valid_phase_9_proof_with_copy_constraints() {
     let fixture = sample_fixture();
     assert!(
         verify(
@@ -198,14 +194,51 @@ fn verifier_accepts_valid_phase_9_fixture() {
 }
 
 #[test]
-fn verifier_rejects_tampered_public_inputs() {
+fn verifier_rejects_tampered_evaluations() {
     let fixture = sample_fixture();
-    let mut wrong_public_inputs = fixture.public_inputs.clone();
-    wrong_public_inputs[0] += Fr::from(1u64);
+
+    let mut proof = fixture.proof.clone();
+    proof.evaluations_at_zeta.wire_a += Fr::from(1u64);
     assert!(
         !verify(
-            &fixture.proof,
-            wrong_public_inputs.as_slice(),
+            &proof,
+            fixture.public_inputs.as_slice(),
+            &fixture.verifier_input,
+            &fixture.srs
+        )
+        .unwrap()
+    );
+
+    let mut proof = fixture.proof.clone();
+    proof.evaluations_at_zeta.wire_b += Fr::from(1u64);
+    assert!(
+        !verify(
+            &proof,
+            fixture.public_inputs.as_slice(),
+            &fixture.verifier_input,
+            &fixture.srs
+        )
+        .unwrap()
+    );
+
+    let mut proof = fixture.proof.clone();
+    proof.evaluations_at_zeta.sigma_1 += Fr::from(1u64);
+    assert!(
+        !verify(
+            &proof,
+            fixture.public_inputs.as_slice(),
+            &fixture.verifier_input,
+            &fixture.srs
+        )
+        .unwrap()
+    );
+
+    let mut proof = fixture.proof.clone();
+    proof.shifted_evaluations.grand_product_next += Fr::from(1u64);
+    assert!(
+        !verify(
+            &proof,
+            fixture.public_inputs.as_slice(),
             &fixture.verifier_input,
             &fixture.srs
         )
@@ -214,20 +247,101 @@ fn verifier_rejects_tampered_public_inputs() {
 }
 
 #[test]
-fn verifier_accepts_valid_mimc_fixture_shape() {
-    let circuit = build_mimc_feistel_circuit(Fr::from(7u64), 4)
+fn verifier_rejects_tampered_quotient_chunk_commitments() {
+    let fixture = sample_fixture();
+    let mut proof = fixture.proof.clone();
+    proof.quotient_chunk_commitments.t_lo = proof.quotient_chunk_commitments.t_mid.clone();
+    assert!(
+        !verify(
+            &proof,
+            fixture.public_inputs.as_slice(),
+            &fixture.verifier_input,
+            &fixture.srs
+        )
         .unwrap()
-        .circuit;
-    let public_inputs = vec![];
-    let copy_constraints = vec![];
-    let srs = sample_srs(circuit.domain_size().unwrap());
-    let proof = prove(
-        &circuit,
-        copy_constraints.as_slice(),
-        public_inputs.clone(),
-        &srs,
-    )
-    .unwrap();
-    let verifier_input = build_verifier_input(&circuit, copy_constraints.as_slice());
-    assert!(verify(&proof, public_inputs.as_slice(), &verifier_input, &srs).unwrap());
+    );
+
+    let mut proof = fixture.proof.clone();
+    proof.quotient_chunk_commitments.t_hi = proof.quotient_chunk_commitments.t_lo.clone();
+    assert!(
+        !verify(
+            &proof,
+            fixture.public_inputs.as_slice(),
+            &fixture.verifier_input,
+            &fixture.srs
+        )
+        .unwrap()
+    );
+}
+
+#[test]
+fn verifier_rejects_tampered_opening_commitments() {
+    let fixture = sample_fixture();
+    let mut proof = fixture.proof.clone();
+    proof.opening_commitments.at_zeta = proof.opening_commitments.at_shifted_zeta.clone();
+    assert!(
+        !verify(
+            &proof,
+            fixture.public_inputs.as_slice(),
+            &fixture.verifier_input,
+            &fixture.srs
+        )
+        .unwrap()
+    );
+
+    let mut proof = fixture.proof.clone();
+    proof.opening_commitments.at_shifted_zeta = proof.opening_commitments.at_zeta.clone();
+    assert!(
+        !verify(
+            &proof,
+            fixture.public_inputs.as_slice(),
+            &fixture.verifier_input,
+            &fixture.srs
+        )
+        .unwrap()
+    );
+}
+
+#[test]
+fn verifier_rejects_tampered_external_public_inputs() {
+    let fixture = sample_fixture();
+    let mut public_inputs = fixture.public_inputs.clone();
+    public_inputs[1] += Fr::from(1u64);
+    assert!(
+        !verify(
+            &fixture.proof,
+            public_inputs.as_slice(),
+            &fixture.verifier_input,
+            &fixture.srs
+        )
+        .unwrap()
+    );
+}
+
+#[test]
+fn verifier_rejects_tampered_fixed_data_transcript_input() {
+    let fixture = sample_fixture();
+    let mut verifier_input = fixture.verifier_input.clone();
+    verifier_input.selector_polynomials.q_m = verifier_input.selector_polynomials.q_l.clone();
+    assert!(
+        !verify(
+            &fixture.proof,
+            fixture.public_inputs.as_slice(),
+            &verifier_input,
+            &fixture.srs
+        )
+        .unwrap()
+    );
+
+    let mut verifier_input = fixture.verifier_input.clone();
+    verifier_input.protocol_params.permutation_column_factors[1] = Fr::from(1u64);
+    assert!(
+        !verify(
+            &fixture.proof,
+            fixture.public_inputs.as_slice(),
+            &verifier_input,
+            &fixture.srs
+        )
+        .unwrap()
+    );
 }

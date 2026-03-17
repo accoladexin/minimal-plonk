@@ -66,7 +66,10 @@ impl KzgSrs {
     /// Output: `Ok(())` if shape is valid, otherwise an error.
     /// Example: rejects empty `g1_powers` or non-2-length `g2_powers`.
     pub fn validate_shape(&self) -> Result<()> {
-        ensure(!self.g1_powers.is_empty(), "kzg srs g1_powers must be non-empty")?;
+        ensure(
+            !self.g1_powers.is_empty(),
+            "kzg srs g1_powers must be non-empty",
+        )?;
         ensure(
             self.g2_powers.len() == 2,
             "kzg srs g2_powers must contain [1]_2 and [tau]_2",

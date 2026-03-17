@@ -1,5 +1,5 @@
 trait Engine {
-    type Fuel;   // 关联类型：燃料输入
+    type Fuel; // 关联类型：燃料输入
     type Output; // 关联类型：能效输出
 
     // 核心方法：使用关联类型作为参数和返回值
@@ -9,7 +9,7 @@ trait Engine {
 struct GasEngine;
 impl Engine for GasEngine {
     type Fuel = String; // 汽油引擎底层用 String
-    type Output = u32;  // 输出整数功率
+    type Output = u32; // 输出整数功率
 
     fn add_energy(&self, fuel: Self::Fuel) -> Self::Output {
         println!("正在往油箱注入: {}", fuel);
@@ -48,8 +48,8 @@ fn main333() {
 
     // 2. 调用时，传入的是 u64
     operate_engine(&ele_eng, 5000);
-    
+
     // 3. 错误尝试：如果给电动引擎加汽油，编译器会直接报错
-    // operate_engine(&ele_eng, String::from("汽油")); 
+    // operate_engine(&ele_eng, String::from("汽油"));
     // 报错信息：expected `u64`, found `String`
 }

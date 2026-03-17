@@ -1,25 +1,40 @@
-//! Step 8.1: Plonk prover orchestration.
+//! Step 9.3: paper-aligned prover orchestration.
 //!
-//! This module only stitches together the components that were already
-//! implemented in Phase 1-7. It does not reimplement quotient, permutation,
-//! transcript, or KZG math.
+//! This module keeps the prover flow readable:
+//! 1. witness commitments
+//! 2. grand product commitment
+//! 3. quotient chunk commitments
+//! 4. linearization polynomial
+//! 5. `W_z / W_{z omega}` opening commitments
 
 use ark_ff::Zero;
-use ark_poly::{EvaluationDomain, Polynomial};
+use ark_std::UniformRand;
+use ark_poly::{DenseUVPolynomial, EvaluationDomain, Polynomial, univariate::DensePolynomial};
+use rand::thread_rng;
 
 use crate::{
     cs::{Circuit, SelectorColumns},
-    domain::{PlonkDomain, build_domain_from_size},
+    curve::Fr,
+    domain::{PlonkDomain, build_domain_from_size, domain_params},
     error::Result,
-    kzg::{KzgSrs, commit_polynomial, open_polynomial_at_point, open_polynomials_at_same_point},
+    kzg::{KzgSrs, build_witness_polynomial, commit_polynomial},
     permutation::{
-        CopyConstraint, build_sigma_from_copy_constraints, compute_grand_product_evaluations,
+        CopyConstraint, K1, K2, build_sigma_from_copy_constraints,
+        compute_grand_product_evaluations,
         grand_product::compute_sigma_tag_evaluations_for_quotient,
         interpolate_grand_product_evaluations,
     },
-    quotient::compute_step_5_1,
+    quotient::{
+        QuotientChunkPolynomials, blind_grand_product_polynomial, blind_witness_polynomial,
+        build_linearization_polynomial, compute_blinded_quotient_polynomial, compute_step_5_1,
+        rerandomize_quotient_chunks, split_quotient_polynomial,
+    },
     transcript::Transcript,
-    types::{EvaluationsAtZeta, PlonkProof, QuotientInputs, ShiftedEvaluations, SigmaTagPolynomials},
+    types::{
+        Commitment, EvaluationsAtZeta, OpeningCommitments, PlonkProof, QuotientChunkCommitments,
+        QuotientInputs, SelectorPolynomials, ShiftedEvaluations, SigmaTagPolynomials,
+        TranscriptPreprocessedInput, VerifierProtocolParams,
+    },
     validate::ensure,
     witness::{
         WitnessColumns, WitnessPolynomials, interpolate_column_evaluations,
@@ -27,55 +42,61 @@ use crate::{
     },
 };
 
-/// 功能说明：按 Step 8.1 固定流程生成当前版本的最小 `PlonkProof`。
-/// 输入：已经 `pad_to_domain()` 并冻结的电路、copy constraints、公开输入和 KZG SRS。
-/// 输出：符合 Step 7.1 冻结格式的 `PlonkProof`。
+/// 功能说明：按 Step 9.3 冻结边界生成 paper-aligned prover proof。
+/// 输入：已冻结电路、copy constraints、外部 `public_inputs` 与 KZG SRS。
+/// 输出：一个 `PlonkProof`。
 /// 示例：`let proof = prove(&circuit, &copy_constraints, public_inputs, &srs)?;`
+/// 按 Step 9.3 冻结边界生成 paper-aligned prover proof。
 pub fn prove(
     circuit: &Circuit,
-    copy_constraints: &[CopyConstraint], // 只输入有连线的permutation约束，空白位置默认不连线。
-    public_inputs: Vec<crate::curve::Fr>,
+    copy_constraints: &[CopyConstraint],
+    public_inputs: Vec<Fr>,
     srs: &KzgSrs,
 ) -> Result<PlonkProof> {
-    // Paper mapping: prover preprocessing before transcript rounds.
-    // Repo role: normalize the circuit into the fixed H-domain view used by later modules.
-    // Step 8.1 的第一条基本要求：电路必须已经调用过 `pad_to_domain()` 进入冻结状态。
+    // 确保电路是扩展到2**n的
     ensure(
         circuit.is_frozen(),
         "circuit must call pad_to_domain() before prove()",
     )?;
-    // Step 8.1 的第二条基本要求：电路必须在冻结时记录 domain 大小，供后续构建 domain 和 sigma tag 多项式使用。
+
     let domain_size = circuit
         .domain_size()
         .expect("frozen circuit must record domain size");
     let domain = build_domain_from_size(domain_size)?;
-    //  evaluations 形式
+
+    // Repo role: materialize all row-wise data in the shared H-domain view.
+    // 应该是eval形式
     let witness_columns = WitnessColumns::from_padded_circuit(circuit)?;
     let selector_columns = SelectorColumns::from_padded_circuit(circuit)?;
-    // 多项式形式
-    let wire_polynomials = interpolate_witness_column_polynomials(&domain, &witness_columns)?;
-    //
-    // Paper mapping: Prover Round 1, witness commitments A(X), B(X), C(X).
+    let raw_wire_polynomials = interpolate_witness_column_polynomials(&domain, &witness_columns)?;
+    let blinding_scalars = sample_blinding_scalars();
+    // Paper mapping: witness polynomials are blinded before Round 1 commitments.
+    // Repo role: use minimal `(r0 + r1 X) * Z_H(X)` terms so H-domain rows stay unchanged.
+    let wire_polynomials =
+        blind_wire_polynomials(&raw_wire_polynomials, domain_size, &blinding_scalars)?;
+
+    // round1
     let wire_commitments = commit_wire_polynomials(&wire_polynomials, srs)?;
 
-    // 
+    let sigma_mapping = build_sigma_from_copy_constraints(domain_size, copy_constraints)?;
+    let selector_polynomials = build_selector_polynomials(&domain, &selector_columns)?;
+    let sigma_tag_polynomials = build_sigma_tag_polynomials(&domain, &sigma_mapping)?;
+    let transcript_input = build_transcript_preprocessed_input(
+        &domain,
+        &selector_polynomials,
+        &sigma_tag_polynomials,
+        srs,
+    )?;
+
+    // Paper mapping: transcript binds common preprocessed input and statement before Round 1 outputs.
     let mut transcript = Transcript::default();
-    transcript.absorb_plonk_wire_commitments(&wire_commitments);
+    transcript.absorb_phase_9_preprocessed_input(&transcript_input);
     transcript.absorb_plonk_public_inputs(&public_inputs);
-    // Paper mapping: transcript transition from Round 1 to Round 2, derive beta and gamma after A/B/C commitments.
+    transcript.absorb_plonk_wire_commitments(&wire_commitments);
     let beta = transcript.challenge_scalar(b"beta");
     let gamma = transcript.challenge_scalar(b"gamma");
 
-
-    // sigma_mapping构建，这里面只是记录位置
-    let sigma_mapping = build_sigma_from_copy_constraints(domain_size, copy_constraints)?;
-    // 当前 Step 8.1 不把 sigma tag 放进 proof，但 prover 仍按固定数据流显式构造它们。
-
-    // coeff形式 执行这一步仅仅构造/校验流程
-    let _sigma_tag_polynomials = build_sigma_tag_polynomials(&domain, &sigma_mapping)?;
-
-    // Paper mapping: Prover Round 2, grand product recurrence for permutation.
-    //  evaluations，长度为 n + 1，最后一项要返回1
+    // Paper mapping: Prover Round 2, compute and commit grand product Z(X).
     let grand_product_evaluations = compute_grand_product_evaluations(
         &witness_columns.wire_a_evaluations,
         &witness_columns.wire_b_evaluations,
@@ -84,30 +105,36 @@ pub fn prove(
         beta,
         gamma,
     )?;
-    // ifft到多项式（这里只用了前n个evaluations，最后一个1不参与IFFT）
     let grand_product_polynomial = interpolate_grand_product_evaluations(
         &grand_product_evaluations.grand_product_evaluations,
         domain_size,
     )?;
-    // round的commit
+    // Paper mapping: Z(X) also becomes a blinded prover-side object before commitment/opening.
+    // Implementation note: add only `r * Z_H(X)` so the Phase 9 boundary semantics on H stay intact.
+    let grand_product_polynomial = blind_grand_product_polynomial(
+        &grand_product_polynomial,
+        domain_size,
+        blinding_scalars.grand_product,
+    )?;
+    // round 2
     let grand_product_commitment = commit_polynomial(&grand_product_polynomial, srs)?;
-
-
-    // Paper mapping: transcript transition from Round 2 to Round 3, derive alpha after Z commitment.
     transcript.absorb_plonk_grand_product_commitment(&grand_product_commitment);
     let alpha = transcript.challenge_scalar(b"alpha");
 
-    // 
+    // Paper mapping: Prover Round 3, build the full quotient witness and then chunk it.
     let quotient_inputs = QuotientInputs::new(
         witness_columns,
         selector_columns,
         sigma_mapping,
         grand_product_evaluations,
     )?;
-    // Paper mapping: Prover Round 3, quotient identity assembly.
-    // Repo role: reuse Step 5.1 instead of reimplementing gate/permutation algebra here.
-    let quotient_output =
-        compute_step_5_1(&quotient_inputs, public_inputs.as_slice(), alpha, beta, gamma)?;
+    let quotient_output = compute_step_5_1(
+        &quotient_inputs,
+        public_inputs.as_slice(),
+        alpha,
+        beta,
+        gamma,
+    )?;
     ensure(
         quotient_output
             .h_domain
@@ -115,69 +142,99 @@ pub fn prove(
             .iter()
             .all(|value| value.is_zero()),
         "circuit witness, copy constraints, and public_inputs must satisfy Plonk constraints",
-    )?; // 确保在源domain上 T(X) 的 numerator 是零多项式，证明电路约束被满足。（因为此时还没有加上blinding项，如果加上了就无法验证了，因为不会直接在domain上计算）
-    let quotient_polynomial = quotient_output.extended_domain.quotient_polynomial;
-    // 当前版本只有单个 T(X) commitment，次数超出 SRS 时必须直接报错，不能临时分块。
-    // 注意，原论文是允许分块的，但这会增加实现复杂度，且不符合我们 minimal 的初衷。但是后续的blinding步骤仍然需要分块，所以如果不分块的话，SRS的规模就必须足够大，才能支持足够大的电路。
-    srs.validate_polynomial_degree(quotient_polynomial.degree())?;
-    let quotient_commitment = commit_polynomial(&quotient_polynomial, srs)?;
+    )?;
 
-    // Paper mapping: transcript transition from Round 3 to Round 4, derive zeta after T commitment.
-    transcript.absorb_plonk_quotient_commitment(&quotient_commitment);
-    let zeta = transcript.challenge_scalar(b"zeta");
-
-    let omega = domain.element(1);
-    let shifted_zeta = omega * zeta;
-    // Paper mapping: Prover Round 4
-    let (evaluations_at_zeta, shifted_evaluations) = evaluate_opening_points(
+    let quotient_polynomial = compute_blinded_quotient_polynomial(
+        &quotient_inputs,
+        public_inputs.as_slice(),
+        alpha,
+        beta,
+        gamma,
         &wire_polynomials,
         &grand_product_polynomial,
-        &quotient_polynomial,
-        zeta,
-        shifted_zeta,
-    );
+    )?;
+    // Repo role: re-randomize only the committed chunks, while keeping reconstructed `t(X)` unchanged.
+    let quotient_chunks = rerandomize_quotient_chunks(
+        &split_quotient_polynomial(&quotient_polynomial, domain_size)?,
+        domain_size,
+        blinding_scalars.quotient_first,
+        blinding_scalars.quotient_second,
+    )?;
+    let quotient_chunk_commitments =
+        commit_quotient_chunks(&quotient_chunks, &quotient_polynomial, srs)?;
+    transcript.absorb_phase_9_quotient_chunk_commitments(&quotient_chunk_commitments);
+    let zeta = transcript.challenge_scalar(b"zeta");
 
-    // Paper mapping: Prover Round 4 to 5。
-    transcript.absorb_plonk_evaluations(&evaluations_at_zeta, &shifted_evaluations);
+    // Paper mapping: Prover Round 4, publish evaluation payload for the future verifier relation.
+    let shifted_zeta = domain.element(1) * zeta;
+    let evaluations_at_zeta =
+        evaluate_opening_payload(&wire_polynomials, &sigma_tag_polynomials, zeta);
+    let shifted_evaluations =
+        ShiftedEvaluations::new(grand_product_polynomial.evaluate(&shifted_zeta));
+    transcript.absorb_phase_9_evaluations(&evaluations_at_zeta, &shifted_evaluations);
     let v = transcript.challenge_scalar(b"v");
 
-    // Paper mapping: Prover Round 5, opening proofs prepared from the round-4 claims.
-    let opening_at_zeta = open_polynomials_at_same_point(
-        &[
-            wire_polynomials.wire_a_poly.clone(),
-            wire_polynomials.wire_b_poly.clone(),
-            wire_polynomials.wire_c_poly.clone(),
-            grand_product_polynomial.clone(),
-            quotient_polynomial.clone(),
-        ],
+    // Paper mapping: Prover Round 5, construct the explicit linearization polynomial r(X).
+    let linearization_polynomial = build_linearization_polynomial(
+        &domain,
+        &selector_polynomials.q_l,
+        &selector_polynomials.q_r,
+        &selector_polynomials.q_o,
+        &selector_polynomials.q_m,
+        &selector_polynomials.q_c,
+        &sigma_tag_polynomials.wire_c,
+        &grand_product_polynomial,
+        &quotient_chunks,
+        public_inputs.as_slice(),
+        alpha,
+        beta,
+        gamma,
+        zeta,
+        evaluations_at_zeta.wire_a,
+        evaluations_at_zeta.wire_b,
+        evaluations_at_zeta.wire_c,
+        evaluations_at_zeta.sigma_1,
+        evaluations_at_zeta.sigma_2,
+        shifted_evaluations.grand_product_next,
+    );
+    let w_z_polynomial = build_w_z_polynomial(
+        &linearization_polynomial,
+        &wire_polynomials,
+        &sigma_tag_polynomials,
+        &evaluations_at_zeta,
         zeta,
         v,
-        srs,
     )?;
-    let opening_at_shifted_zeta =
-        open_polynomial_at_point(&grand_product_polynomial, shifted_zeta, srs)?;
+    let w_z_omega_polynomial = build_w_z_omega_polynomial(
+        &grand_product_polynomial,
+        shifted_zeta,
+        shifted_evaluations.grand_product_next,
+    )?;
+    let opening_commitments = OpeningCommitments::new(
+        commit_polynomial(&w_z_polynomial, srs)?,
+        commit_polynomial(&w_z_omega_polynomial, srs)?,
+    );
+    transcript.absorb_phase_9_opening_commitments(&opening_commitments);
+    let _u = transcript.challenge_scalar(b"u");
 
     Ok(PlonkProof::new(
         wire_commitments,
         grand_product_commitment,
-        quotient_commitment,
-        public_inputs,
+        quotient_chunk_commitments,
+        opening_commitments,
         evaluations_at_zeta,
         shifted_evaluations,
-        opening_at_zeta.proof,
-        opening_at_shifted_zeta.proof,
     ))
 }
 
-/// 功能说明：把 witness 三列多项式按固定顺序做 KZG commitment。
-/// 输入：`A(X) / B(X) / C(X)` 三个 witness 多项式和 SRS。
-/// 输出：固定顺序的 `[A_commitment, B_commitment, C_commitment]`。
-/// 示例：该结果会先进入 transcript，再导出 `beta/gamma`。
+/// 功能说明：按固定顺序对 witness 三列做 KZG commitment。
+/// 输入：`A(X)/B(X)/C(X)` 与 SRS。
+/// 输出：`[A, B, C]` commitments。
+/// 示例：`commit_wire_polynomials(&wire_polynomials, srs)?`。
 fn commit_wire_polynomials(
     wire_polynomials: &WitnessPolynomials,
     srs: &KzgSrs,
-) -> Result<[crate::types::Commitment; 3]> {
-    // Paper mapping: fixed A/B/C commitment tuple that the transcript binds before beta/gamma.
+) -> Result<[Commitment; 3]> {
     Ok([
         commit_polynomial(&wire_polynomials.wire_a_poly, srs)?,
         commit_polynomial(&wire_polynomials.wire_b_poly, srs)?,
@@ -185,45 +242,250 @@ fn commit_wire_polynomials(
     ])
 }
 
-/// 功能说明：把 sigma mapping 对应的三列 tag evaluations 插值成多项式。
-/// 输入：原始 H-domain 和已经验证过的 sigma mapping。
-/// 输出：`SigmaTagPolynomials`，供当前 prover 数据流和未来 verifier 固定输入边界复用。
-/// 示例：Step 8.1 中它不进入 proof，但会在 prover 端被显式构造。
+/// 功能说明：把 selector evaluations 插值成多项式，供 quotient 与 transcript 复用。
+/// 输入：domain 与 `SelectorColumns`。
+/// 输出：`SelectorPolynomials`。
+/// 示例：`build_selector_polynomials(&domain, &selector_columns)?`。
+fn build_selector_polynomials(
+    domain: &PlonkDomain,
+    selector_columns: &SelectorColumns,
+) -> Result<SelectorPolynomials> {
+    Ok(SelectorPolynomials::new(
+        interpolate_column_evaluations(domain, &selector_columns.q_l_evaluations)?,
+        interpolate_column_evaluations(domain, &selector_columns.q_r_evaluations)?,
+        interpolate_column_evaluations(domain, &selector_columns.q_o_evaluations)?,
+        interpolate_column_evaluations(domain, &selector_columns.q_m_evaluations)?,
+        interpolate_column_evaluations(domain, &selector_columns.q_c_evaluations)?,
+    ))
+}
+
+/// 功能说明：把 sigma tag evaluations 插值成 `S_sigma1/S_sigma2/S_sigma3`。
+/// 输入：domain 与 sigma mapping。
+/// 输出：`SigmaTagPolynomials`。
+/// 示例：`build_sigma_tag_polynomials(&domain, &sigma_mapping)?`。
 fn build_sigma_tag_polynomials(
     domain: &PlonkDomain,
     sigma_mapping: &crate::permutation::SigmaMapping,
 ) -> Result<SigmaTagPolynomials> {
-    // Paper mapping: sigma tag polynomials used by the quotient's permutation relation.
-    // 返回的是eval形式
     let sigma_tag_evaluations = compute_sigma_tag_evaluations_for_quotient(domain, sigma_mapping)?;
     Ok(SigmaTagPolynomials::new(
-        // ifft为coeff形式
         interpolate_column_evaluations(domain, &sigma_tag_evaluations.sigma_a_evaluations)?,
         interpolate_column_evaluations(domain, &sigma_tag_evaluations.sigma_b_evaluations)?,
         interpolate_column_evaluations(domain, &sigma_tag_evaluations.sigma_c_evaluations)?,
     ))
 }
 
-/// 功能说明：计算当前 opening 计划需要写入 proof 的所有 claimed evaluations。
-/// 输入：`A/B/C/Z/T` 多项式、主挑战点 `zeta` 和移位点 `omega * zeta`。
-/// 输出：`EvaluationsAtZeta` 与 `ShiftedEvaluations` 两个固定结构。
-/// 示例：这些值会先被 transcript 吸收，再导出 `v`。
-fn evaluate_opening_points(
+/// 功能说明：为 Phase 9 transcript 构造 commitments-based fixed input。
+/// 输入：domain、selector polynomials、sigma polynomials 与 SRS。
+/// 输出：`TranscriptPreprocessedInput`。
+/// 示例：新的 transcript replay 会显式吸收该对象。
+fn build_transcript_preprocessed_input(
+    domain: &PlonkDomain,
+    selector_polynomials: &SelectorPolynomials,
+    sigma_tag_polynomials: &SigmaTagPolynomials,
+    srs: &KzgSrs,
+) -> Result<TranscriptPreprocessedInput> {
+    let selector_commitments = [
+        commit_polynomial(&selector_polynomials.q_m, srs)?,
+        commit_polynomial(&selector_polynomials.q_l, srs)?,
+        commit_polynomial(&selector_polynomials.q_r, srs)?,
+        commit_polynomial(&selector_polynomials.q_o, srs)?,
+        commit_polynomial(&selector_polynomials.q_c, srs)?,
+    ];
+    let sigma_commitments = [
+        commit_polynomial(&sigma_tag_polynomials.wire_a, srs)?,
+        commit_polynomial(&sigma_tag_polynomials.wire_b, srs)?,
+        commit_polynomial(&sigma_tag_polynomials.wire_c, srs)?,
+    ];
+    Ok(TranscriptPreprocessedInput::new(
+        domain_params(domain),
+        selector_commitments,
+        sigma_commitments,
+        VerifierProtocolParams::new(3, [Fr::from(1u64), Fr::from(K1), Fr::from(K2)]),
+    ))
+}
+
+/// 功能说明：对 `T_lo/T_mid/T_hi` 分别做 commitment，并验证 chunk 重组没有偏移。
+/// 输入：quotient chunks、完整 `T(X)` 与 SRS。
+/// 输出：`QuotientChunkCommitments`。
+/// 示例：`commit_quotient_chunks(&chunks, &t, srs)?`。
+fn commit_quotient_chunks(
+    quotient_chunks: &QuotientChunkPolynomials,
+    full_quotient_polynomial: &DensePolynomial<Fr>,
+    srs: &KzgSrs,
+) -> Result<QuotientChunkCommitments> {
+    srs.validate_polynomial_degree(full_quotient_polynomial.degree())?;
+    Ok(QuotientChunkCommitments::new(
+        commit_polynomial(&quotient_chunks.t_lo, srs)?,
+        commit_polynomial(&quotient_chunks.t_mid, srs)?,
+        commit_polynomial(&quotient_chunks.t_hi, srs)?,
+    ))
+}
+
+/// 功能说明：计算 Phase 9 proof 在 `zeta` 的 evaluation payload。
+/// 输入：wires、sigma tags、`Z(X)`、quotient chunks、domain 大小与 `zeta`。
+/// 输出：`EvaluationsAtZeta`。
+/// 示例：这些值会先进入 transcript，再导出 `v`。
+fn evaluate_opening_payload(
     wire_polynomials: &WitnessPolynomials,
-    grand_product_polynomial: &ark_poly::univariate::DensePolynomial<crate::curve::Fr>,
-    quotient_polynomial: &ark_poly::univariate::DensePolynomial<crate::curve::Fr>,
-    zeta: crate::curve::Fr,
-    shifted_zeta: crate::curve::Fr,
-) -> (EvaluationsAtZeta, ShiftedEvaluations) {
-    // Paper mapping: evaluation targets a(zeta), b(zeta), c(zeta), Z(zeta), T(zeta), Z(omega*zeta).
-    (
-        EvaluationsAtZeta::new(
-            wire_polynomials.wire_a_poly.evaluate(&zeta),
-            wire_polynomials.wire_b_poly.evaluate(&zeta),
-            wire_polynomials.wire_c_poly.evaluate(&zeta),
-            grand_product_polynomial.evaluate(&zeta),
-            quotient_polynomial.evaluate(&zeta),
-        ),
-        ShiftedEvaluations::new(grand_product_polynomial.evaluate(&shifted_zeta)),
+    sigma_tag_polynomials: &SigmaTagPolynomials,
+    zeta: Fr,
+) -> EvaluationsAtZeta {
+    EvaluationsAtZeta::new(
+        wire_polynomials.wire_a_poly.evaluate(&zeta),
+        wire_polynomials.wire_b_poly.evaluate(&zeta),
+        wire_polynomials.wire_c_poly.evaluate(&zeta),
+        sigma_tag_polynomials.wire_a.evaluate(&zeta),
+        sigma_tag_polynomials.wire_b.evaluate(&zeta),
     )
+}
+
+/// 功能说明：构造 paper-aligned 的 `W_z(X)` witness polynomial。
+/// 输入：`r(X)`、wires、sigma polynomials、`zeta` 评估值、`zeta` 与 `v`。
+/// 输出：`W_z(X)`。
+/// 示例：`build_w_z_polynomial(&r, ..., zeta, v)?`。
+fn build_w_z_polynomial(
+    linearization_polynomial: &DensePolynomial<Fr>,
+    wire_polynomials: &WitnessPolynomials,
+    sigma_tag_polynomials: &SigmaTagPolynomials,
+    evaluations_at_zeta: &EvaluationsAtZeta,
+    zeta: Fr,
+    v: Fr,
+) -> Result<DensePolynomial<Fr>> {
+    // Paper mapping: W_z batches r(X), a(X), b(X), c(X), S_sigma1(X), S_sigma2(X) at zeta.
+    // Implementation note: this repository explicitly subtracts `r(zeta)` here so the
+    // witness construction remains well-defined before Step 9.4 verifier lands.
+    let numerator = (linearization_polynomial
+        - &DensePolynomial::from_coefficients_vec(vec![linearization_polynomial.evaluate(&zeta)]))
+        + build_centered_opening_term(&wire_polynomials.wire_a_poly, evaluations_at_zeta.wire_a, v)
+        + build_centered_opening_term(
+            &wire_polynomials.wire_b_poly,
+            evaluations_at_zeta.wire_b,
+            v * v,
+        )
+        + build_centered_opening_term(
+            &wire_polynomials.wire_c_poly,
+            evaluations_at_zeta.wire_c,
+            v * v * v,
+        )
+        + build_centered_opening_term(
+            &sigma_tag_polynomials.wire_a,
+            evaluations_at_zeta.sigma_1,
+            v * v * v * v,
+        )
+        + build_centered_opening_term(
+            &sigma_tag_polynomials.wire_b,
+            evaluations_at_zeta.sigma_2,
+            v * v * v * v * v,
+        );
+    build_witness_polynomial(&numerator, zeta, Fr::zero())
+}
+
+/// 功能说明：构造 shifted opening 的 `W_{z omega}(X)`。
+/// 输入：`Z(X)`、`omega*zeta` 与 `Z(omega*zeta)`。
+/// 输出：`W_{z omega}(X)`。
+/// 示例：`build_w_z_omega_polynomial(&z_poly, shifted_zeta, value)?`。
+fn build_w_z_omega_polynomial(
+    grand_product_polynomial: &DensePolynomial<Fr>,
+    shifted_zeta: Fr,
+    shifted_value: Fr,
+) -> Result<DensePolynomial<Fr>> {
+    // Paper mapping: the shifted witness only opens Z(X) at omega * zeta.
+    build_witness_polynomial(grand_product_polynomial, shifted_zeta, shifted_value)
+}
+
+/// 功能说明：构造 `(p(X) - p(point)) * weight` 这一类同点 opening 项。
+/// 输入：多项式、该点的评估值与聚合权重。
+/// 输出：缩放后的居中多项式。
+/// 示例：`build_centered_opening_term(&a_poly, a_at_zeta, v)`。
+fn build_centered_opening_term(
+    polynomial: &DensePolynomial<Fr>,
+    value: Fr,
+    weight: Fr,
+) -> DensePolynomial<Fr> {
+    scale_polynomial(
+        &(polynomial - &DensePolynomial::from_coefficients_vec(vec![value])),
+        weight,
+    )
+}
+
+/// 功能说明：把一个多项式整体乘以一个标量。
+/// 输入：多项式与标量。
+/// 输出：缩放后的多项式。
+/// 示例：`scale_polynomial(&poly, alpha)`。
+fn scale_polynomial(polynomial: &DensePolynomial<Fr>, scalar: Fr) -> DensePolynomial<Fr> {
+    if scalar.is_zero() || polynomial.is_zero() {
+        return DensePolynomial::zero();
+    }
+
+    DensePolynomial::from_coefficients_vec(
+        polynomial
+            .coeffs
+            .iter()
+            .map(|coefficient| *coefficient * scalar)
+            .collect(),
+    )
+}
+
+/// 功能说明：收集 Step 10.2 prover 需要的最小 blinding randomness。
+/// 输入：无。
+/// 输出：本次 prove 使用的一组随机标量。
+/// 示例：`let blinders = sample_blinding_scalars();`。
+fn sample_blinding_scalars() -> ProverBlindingScalars {
+    let mut rng = thread_rng();
+    ProverBlindingScalars {
+        wire_a_constant: Fr::rand(&mut rng),
+        wire_a_linear: Fr::zero(),
+        wire_b_constant: Fr::rand(&mut rng),
+        wire_b_linear: Fr::zero(),
+        wire_c_constant: Fr::rand(&mut rng),
+        wire_c_linear: Fr::zero(),
+        grand_product: Fr::rand(&mut rng),
+        quotient_first: Fr::rand(&mut rng),
+        quotient_second: Fr::rand(&mut rng),
+    }
+}
+
+/// 功能说明：把 Step 10.2 witness blinding 应用到 `A/B/C`。
+/// 输入：原始 witness polynomials、原始 domain 大小、blinding scalars。
+/// 输出：blinded `A/B/C`。
+/// 示例：`blind_wire_polynomials(&raw, n, &blinders)?`。
+fn blind_wire_polynomials(
+    wire_polynomials: &WitnessPolynomials,
+    domain_size: usize,
+    blinding_scalars: &ProverBlindingScalars,
+) -> Result<WitnessPolynomials> {
+    Ok(WitnessPolynomials {
+        wire_a_poly: blind_witness_polynomial(
+            &wire_polynomials.wire_a_poly,
+            domain_size,
+            blinding_scalars.wire_a_constant,
+            blinding_scalars.wire_a_linear,
+        )?,
+        wire_b_poly: blind_witness_polynomial(
+            &wire_polynomials.wire_b_poly,
+            domain_size,
+            blinding_scalars.wire_b_constant,
+            blinding_scalars.wire_b_linear,
+        )?,
+        wire_c_poly: blind_witness_polynomial(
+            &wire_polynomials.wire_c_poly,
+            domain_size,
+            blinding_scalars.wire_c_constant,
+            blinding_scalars.wire_c_linear,
+        )?,
+    })
+}
+
+/// Step 10.2 prover-side random scalars.
+struct ProverBlindingScalars {
+    wire_a_constant: Fr,
+    wire_a_linear: Fr,
+    wire_b_constant: Fr,
+    wire_b_linear: Fr,
+    wire_c_constant: Fr,
+    wire_c_linear: Fr,
+    grand_product: Fr,
+    quotient_first: Fr,
+    quotient_second: Fr,
 }

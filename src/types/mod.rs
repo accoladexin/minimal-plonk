@@ -10,10 +10,11 @@ mod verifier_input;
 
 pub use config::{DomainParams, PlonkConfig, TranscriptHash};
 pub use proof::{
-    Commitment, EvaluationsAtZeta, OpeningProof, PlonkProof, ProofSkeleton, ShiftedEvaluations,
+    Commitment, EvaluationsAtZeta, OpeningCommitments, OpeningProof, PlonkProof, ProofSkeleton,
+    QuotientChunkCommitments, ShiftedEvaluations,
 };
 pub use quotient_input::QuotientInputs;
 pub use verifier_input::{
-    SelectorPolynomials, SigmaTagPolynomials, VerifierPreprocessedInput,
-    VerifierProtocolParams,
+    SelectorPolynomials, SigmaTagPolynomials, TranscriptPreprocessedInput,
+    VerifierPreprocessedInput, VerifierProtocolParams,
 };

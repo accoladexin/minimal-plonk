@@ -93,9 +93,14 @@ fn single_opening_fails_with_wrong_value() {
     let opening = open_polynomial_at_point(&polynomial, point, &srs).expect("open should succeed");
     let wrong_value = opening.value + Fr::from(1u64);
 
-    let verified =
-        verify_opening(&commitment, opening.point, wrong_value, &opening.proof, &srs)
-            .expect("verify should run");
+    let verified = verify_opening(
+        &commitment,
+        opening.point,
+        wrong_value,
+        &opening.proof,
+        &srs,
+    )
+    .expect("verify should run");
     assert!(!verified);
 }
 

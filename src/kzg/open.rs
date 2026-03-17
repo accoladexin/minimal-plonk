@@ -24,7 +24,7 @@ pub struct KzgOpening {
     pub proof: KzgOpeningProof,
 }
 
-/// Function: open one polynomial at one point. 
+/// Function: open one polynomial at one point.
 /// Input: polynomial, point and SRS.
 /// Output: point/value/proof bundle.
 /// Example: `let opening = open_polynomial_at_point(&poly, z, &srs)?;`.
@@ -53,7 +53,7 @@ pub fn open_polynomial_at_point(
 /// Input: polynomial `p`, point `z`, and value `p(z)`.
 /// Output: witness polynomial `w`.
 /// Example: used internally by KZG open.
-fn build_witness_polynomial(
+pub fn build_witness_polynomial(
     polynomial: &DensePolynomial<Fr>,
     point: Fr,
     value: Fr,
@@ -66,12 +66,11 @@ fn build_witness_polynomial(
     // 构建分母多项式 `g(X) = X - z`。也是多项式形式
     let divisor_polynomial = DensePolynomial::from_coefficients_vec(vec![-point, Fr::from(1u64)]);
 
-    let (quotient, remainder) =
-        DenseOrSparsePolynomial::from(&numerator_polynomial)
-            .divide_with_q_and_r(&DenseOrSparsePolynomial::from(&divisor_polynomial))
-            .ok_or(PlonkError::InvalidInput(
-                "failed to divide by (X - z) while building kzg witness polynomial",
-            ))?;
+    let (quotient, remainder) = DenseOrSparsePolynomial::from(&numerator_polynomial)
+        .divide_with_q_and_r(&DenseOrSparsePolynomial::from(&divisor_polynomial))
+        .ok_or(PlonkError::InvalidInput(
+            "failed to divide by (X - z) while building kzg witness polynomial",
+        ))?;
 
     ensure(
         remainder.is_zero(),

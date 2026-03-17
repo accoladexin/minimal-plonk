@@ -12,4 +12,3 @@ pub fn ensure(condition: bool, message: &'static str) -> Result<()> {
         Err(PlonkError::InvalidInput(message))
     }
 }
-
