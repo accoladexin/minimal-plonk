@@ -87,7 +87,7 @@ impl SigmaMapping {
 /// 功能说明：根据 copy 约束构造 sigma 映射。
 /// 输入：`domain_size=n` 和 copy 约束集合。
 /// 输出：已校验的 `SigmaMapping`。
-/// 示例：若 A0、B1、C2 同属一类，这三个位置会连成一个 cycle。
+/// 示例：返回对应的相等的位置，例如返回[3,1,0,2] 说明0-3，1-1，2-0，3-2。
 pub fn build_sigma_from_copy_constraints(
     domain_size: usize,
     constraints: &[CopyConstraint],
@@ -95,8 +95,12 @@ pub fn build_sigma_from_copy_constraints(
     ensure(domain_size > 0, "domain_size must be positive")?;
 
     let universe_len = 3 * domain_size;
+    // 第一步：并查集归类 (DSU)
     let mut dsu = DisjointSet::new(universe_len);
-
+    // 这是置换证明（Permutation Proof）的核心。对于每一组相等的变量，函数将它们连成一个圆圈：
+    //- 例子：如果 `{1, 5, 9}` 相等。
+    // - 返回的映射表（`sigma_ids`）中会记录：`1->5`, `5->9`, `9->1`。
+    // - 为什么要连成圈？ 这样在数学上可以通过一个置换多项式来证明：只要这一圈对应位置的数值都一样，累乘结果就会抵消。
     for constraint in constraints {
         let left_id = pos_to_wire_id(constraint.left, domain_size)?;
         let right_id = pos_to_wire_id(constraint.right, domain_size)?;

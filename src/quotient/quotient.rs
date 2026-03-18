@@ -1013,25 +1013,37 @@ pub fn split_quotient_polynomial(
 /// 输出：在 H 上取值不变、但承诺与随机点 opening 改变后的多项式。
 /// 示例：`blind_witness_polynomial(&a_raw, n, r0, r1)`。
 pub fn blind_witness_polynomial(
-    polynomial: &DensePolynomial<Fr>,
-    domain_size: usize,
-    constant_blinder: Fr,
-    linear_blinder: Fr,
-) -> Result<DensePolynomial<Fr>> {
+    polynomial: &DensePolynomial<Fr>, // 输入：原始多项式的引用（只读）
+    domain_size: usize,               // 输入：Domain 的大小 n
+    constant_blinder: Fr,             // 输入：随机标量 c0
+    linear_blinder: Fr,               // 输入：随机标量 c1
+) -> Result<DensePolynomial<Fr>> {    // 返回：包装在 Result 中的新多项式
+    // 1. 安全检查，防止 domain 为 0 导致溢出或错误
     ensure(domain_size > 0, "domain_size must be positive")?;
 
+    // 2. 克隆原始系数。DensePolynomial 内部通常是一个 Vec<Fr>
     let mut coefficients = polynomial.coeffs.clone();
+
+    // 3. 扩容。我们需要存到 X^{n+1} 项，所以向量长度需要是 n+2
+    // 如果原多项式次数较低，这里会补 0
     coefficients.resize(domain_size + 2, Fr::zero());
+
+    // 4. 根据数学公式修改系数：
+    // 修改常数项 (X^0): a0 = a0 - c0
     coefficients[0] -= constant_blinder;
+    // 修改一次项 (X^1): a1 = a1 - c1
     coefficients[1] -= linear_blinder;
+    // 修改 n 次项 (X^n): an = an + c0
     coefficients[domain_size] += constant_blinder;
+    // 修改 n+1 次项 (X^{n+1}): a_{n+1} = a_{n+1} + c1
     coefficients[domain_size + 1] += linear_blinder;
 
+    // 5. 包装返回结果
+    // trim_trailing_zeros 是为了删掉高位无意义的 0（减小空间）
     Ok(DensePolynomial::from_coefficients_vec(trim_trailing_zeros(
         coefficients,
     )))
 }
-
 /// 功能说明：给 grand product polynomial 添加 `r * Z_H(X)` 形式的最小 blind。
 /// 输入：原始 `Z(X)`、原始 domain 大小、一个随机标量。
 /// 输出：在 H 上保持同值的 blinded `Z(X)`。

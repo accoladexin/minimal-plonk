@@ -69,6 +69,7 @@ pub fn prove(
     let witness_columns = WitnessColumns::from_padded_circuit(circuit)?;
     let selector_columns = SelectorColumns::from_padded_circuit(circuit)?;
     let raw_wire_polynomials = interpolate_witness_column_polynomials(&domain, &witness_columns)?;
+    //  生成随机随机seed
     let blinding_scalars = sample_blinding_scalars();
     // Paper mapping: witness polynomials are blinded before Round 1 commitments.
     // Repo role: use minimal `(r0 + r1 X) * Z_H(X)` terms so H-domain rows stay unchanged.
@@ -78,9 +79,12 @@ pub fn prove(
     // round1
     let wire_commitments = commit_wire_polynomials(&wire_polynomials, srs)?;
 
+    // 只返回一个3n的位置映射
     let sigma_mapping = build_sigma_from_copy_constraints(domain_size, copy_constraints)?;
     let selector_polynomials = build_selector_polynomials(&domain, &selector_columns)?;
+    // S_sigma1/S_sigma2/S_sigma3 多项式
     let sigma_tag_polynomials = build_sigma_tag_polynomials(&domain, &sigma_mapping)?;
+    // 初始化
     let transcript_input = build_transcript_preprocessed_input(
         &domain,
         &selector_polynomials,
@@ -259,7 +263,7 @@ fn build_selector_polynomials(
     ))
 }
 
-/// 功能说明：把 sigma tag evaluations 插值成 `S_sigma1/S_sigma2/S_sigma3`。
+/// 功能说明：把 sigma tag evaluations 插值成 `S_sigma1/S_sigma2/S_sigma3` 主要是IFFT。
 /// 输入：domain 与 sigma mapping。
 /// 输出：`SigmaTagPolynomials`。
 /// 示例：`build_sigma_tag_polynomials(&domain, &sigma_mapping)?`。

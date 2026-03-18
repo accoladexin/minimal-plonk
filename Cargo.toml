@@ -37,3 +37,7 @@ harness = false
 [[bench]]
 name = "micro_pairing"
 harness = false
+
+[[bench]]
+name = "macro_plonk"
+harness = false

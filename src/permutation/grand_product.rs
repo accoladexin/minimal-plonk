@@ -231,6 +231,7 @@ pub(crate) fn compute_sigma_tag_evaluations_for_quotient(
     let mut sigma_c_evaluations = Vec::with_capacity(domain_size);
 
     for row_index in 0..domain_size {
+        // 对应位置的在coset上的值，也就是H U k1H Uk2U
         sigma_a_evaluations.push(sigma_target_tag(sigma, domain, Column::A, row_index)?);
         sigma_b_evaluations.push(sigma_target_tag(sigma, domain, Column::B, row_index)?);
         sigma_c_evaluations.push(sigma_target_tag(sigma, domain, Column::C, row_index)?);
@@ -314,8 +315,8 @@ fn row_terms(
 fn sigma_target_tag(
     sigma: &SigmaMapping,
     domain: &PlonkDomain,
-    source_column: Column,
-    source_row: usize,
+    source_column: Column, // 这个就是tag，表示 a 列或者b列，或者c列
+    source_row: usize, //行的位置 [1,,,n]
 ) -> Result<Fr> {
     // Paper mapping: convert one sigma target position into its tagged field element k_j * omega^i.
     let source_id = pos_to_wire_id(
@@ -325,6 +326,7 @@ fn sigma_target_tag(
         },
         sigma.domain_size(),
     )?;
+    // 相等的位置
     let target_id = sigma.image_at(source_id)?;
     ensure(
         target_id < sigma.expected_sigma_len(),
