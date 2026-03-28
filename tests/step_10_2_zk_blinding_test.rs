@@ -2,7 +2,7 @@
 
 use ark_ec::{AffineRepr, Group};
 use ark_ff::Field;
-use ark_poly::EvaluationDomain;
+use ark_poly::{DenseUVPolynomial, EvaluationDomain, Polynomial};
 
 use minimal_plonk::{
     cs::{Circuit, SelectorColumns},
@@ -11,6 +11,9 @@ use minimal_plonk::{
     kzg::{KzgSrs, commit_polynomial, verify_opening},
     permutation::{Column, CopyConstraint, Pos, SigmaMapping, build_sigma_from_copy_constraints},
     prover::prove,
+    quotient::{
+        blind_grand_product_polynomial, evaluate_chunked_quotient, split_quotient_polynomial,
+    },
     transcript::Transcript,
     types::{
         Commitment, SelectorPolynomials, SigmaTagPolynomials, TranscriptPreprocessedInput,
@@ -104,7 +107,7 @@ fn build_public_input_copy_circuit() -> (Circuit, Vec<CopyConstraint>, Vec<Fr>) 
 }
 
 fn sample_srs(domain_size: usize) -> KzgSrs {
-    KzgSrs::setup_for_testing((4 * domain_size).next_power_of_two()).unwrap()
+    KzgSrs::setup_for_testing((8 * domain_size).next_power_of_two()).unwrap()
 }
 
 fn build_sigma_tag_evaluations(
@@ -297,6 +300,60 @@ fn repeated_proofs_change_blinded_commitments_but_both_verify() {
     );
     assert!(verify(&left, public_inputs.as_slice(), &verifier_input, &srs).unwrap());
     assert!(verify(&right, public_inputs.as_slice(), &verifier_input, &srs).unwrap());
+}
+
+#[test]
+fn grand_product_blinding_matches_paper_quadratic_shape() {
+    let raw = ark_poly::univariate::DensePolynomial::from_coefficients_vec(vec![
+        Fr::from(11u64),
+        Fr::from(13u64),
+    ]);
+    let domain_size = 4usize;
+    let constant = Fr::from(5u64);
+    let linear = Fr::from(7u64);
+    let quadratic = Fr::from(9u64);
+
+    let blinded =
+        blind_grand_product_polynomial(&raw, domain_size, constant, linear, quadratic).unwrap();
+
+    let mut expected = raw.coeffs.clone();
+    expected.resize(domain_size + 3, Fr::from(0u64));
+    expected[0] -= constant;
+    expected[1] -= linear;
+    expected[2] -= quadratic;
+    expected[domain_size] += constant;
+    expected[domain_size + 1] += linear;
+    expected[domain_size + 2] += quadratic;
+
+    assert_eq!(blinded.coeffs, expected);
+}
+
+#[test]
+fn quotient_split_keeps_high_degree_tail_inside_t_hi() {
+    let domain_size = 4usize;
+    let quotient = ark_poly::univariate::DensePolynomial::from_coefficients_vec(vec![
+        Fr::from(1u64),
+        Fr::from(2u64),
+        Fr::from(3u64),
+        Fr::from(4u64),
+        Fr::from(5u64),
+        Fr::from(6u64),
+        Fr::from(7u64),
+        Fr::from(8u64),
+        Fr::from(9u64),
+        Fr::from(10u64),
+        Fr::from(11u64),
+    ]);
+    let chunks = split_quotient_polynomial(&quotient, domain_size).unwrap();
+    let point = Fr::from(13u64);
+
+    assert_eq!(chunks.t_lo.coeffs.len(), domain_size);
+    assert_eq!(chunks.t_mid.coeffs.len(), domain_size);
+    assert_eq!(chunks.t_hi.coeffs, vec![Fr::from(9u64), Fr::from(10u64), Fr::from(11u64)]);
+    assert_eq!(
+        evaluate_chunked_quotient(&chunks, domain_size, point),
+        quotient.evaluate(&point)
+    );
 }
 
 #[test]

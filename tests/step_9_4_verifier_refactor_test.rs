@@ -95,7 +95,7 @@ fn build_public_input_copy_circuit() -> (Circuit, Vec<CopyConstraint>, Vec<Fr>) 
 }
 
 fn sample_srs(domain_size: usize) -> KzgSrs {
-    KzgSrs::setup_for_testing((4 * domain_size).next_power_of_two()).unwrap()
+    KzgSrs::setup_for_testing((8 * domain_size).next_power_of_two()).unwrap()
 }
 
 fn build_sigma_tag_evaluations(

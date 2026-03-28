@@ -111,7 +111,7 @@ fn build_public_input_copy_circuit(
 /// 输出：能覆盖当前 prover 路径的测试 SRS。
 /// 示例：Step 8.1 成功路径测试统一使用这个 helper。
 fn sample_srs_for_prover(domain_size: usize) -> KzgSrs {
-    let extended_size = (4 * domain_size).next_power_of_two();
+    let extended_size = (8 * domain_size).next_power_of_two();
     KzgSrs::setup_for_testing(extended_size).expect("testing srs should build")
 }
 

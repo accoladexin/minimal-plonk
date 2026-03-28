@@ -99,7 +99,7 @@ fn build_macro_fixture(rounds: usize) -> MacroFixture {
 /// 输出：本轮 benchmark 使用的 KZG SRS。
 /// 示例：`let srs = sample_srs(512);`
 fn sample_srs(domain_size: usize) -> KzgSrs {
-    KzgSrs::setup_for_testing((4 * domain_size).next_power_of_two())
+    KzgSrs::setup_for_testing((8 * domain_size).next_power_of_two())
         .expect("macrobench srs should build")
 }
 

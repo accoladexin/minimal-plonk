@@ -93,11 +93,15 @@ impl OpeningCommitments {
 /// Phase 9 proof layout frozen by Step 9.2.
 #[derive(Clone, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct PlonkProof {
+    // commit
     pub wire_commitments: [Commitment; 3],
     pub grand_product_commitment: Commitment,
     pub quotient_chunk_commitments: QuotientChunkCommitments,
+    // 两个W
     pub opening_commitments: OpeningCommitments,
+    // 第一组多项式的打开点
     pub evaluations_at_zeta: EvaluationsAtZeta,
+    // 第二组的多项式的打开点，只有一个值
     pub shifted_evaluations: ShiftedEvaluations,
 }
 impl PlonkProof {

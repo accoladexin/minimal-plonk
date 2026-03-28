@@ -8,8 +8,8 @@
 //! 5. `W_z / W_{z omega}` opening commitments
 
 use ark_ff::Zero;
-use ark_std::UniformRand;
 use ark_poly::{DenseUVPolynomial, EvaluationDomain, Polynomial, univariate::DensePolynomial};
+use ark_std::UniformRand;
 use rand::thread_rng;
 
 use crate::{
@@ -114,11 +114,13 @@ pub fn prove(
         domain_size,
     )?;
     // Paper mapping: Z(X) also becomes a blinded prover-side object before commitment/opening.
-    // Implementation note: add only `r * Z_H(X)` so the Phase 9 boundary semantics on H stay intact.
+    // Repo role: follow the paper's quadratic Round 2 masking shape `(b7 X^2 + b8 X + b9) * Z_H(X)`.
     let grand_product_polynomial = blind_grand_product_polynomial(
         &grand_product_polynomial,
         domain_size,
-        blinding_scalars.grand_product,
+        blinding_scalars.grand_product_constant,
+        blinding_scalars.grand_product_linear,
+        blinding_scalars.grand_product_quadratic,
     )?;
     // round 2
     let grand_product_commitment = commit_polynomial(&grand_product_polynomial, srs)?;
@@ -148,6 +150,7 @@ pub fn prove(
         "circuit witness, copy constraints, and public_inputs must satisfy Plonk constraints",
     )?;
 
+    // 这个才是正在的round3 round1和round2带上了blinding terms
     let quotient_polynomial = compute_blinded_quotient_polynomial(
         &quotient_inputs,
         public_inputs.as_slice(),
@@ -157,24 +160,31 @@ pub fn prove(
         &wire_polynomials,
         &grand_product_polynomial,
     )?;
+
     // Repo role: re-randomize only the committed chunks, while keeping reconstructed `t(X)` unchanged.
+    // &split_quotient_polynomial(&quotient_polynomial, domain_size)?, 切分为3个多项式
     let quotient_chunks = rerandomize_quotient_chunks(
         &split_quotient_polynomial(&quotient_polynomial, domain_size)?,
         domain_size,
         blinding_scalars.quotient_first,
         blinding_scalars.quotient_second,
     )?;
+    // round3的commit
     let quotient_chunk_commitments =
         commit_quotient_chunks(&quotient_chunks, &quotient_polynomial, srs)?;
+
     transcript.absorb_phase_9_quotient_chunk_commitments(&quotient_chunk_commitments);
     let zeta = transcript.challenge_scalar(b"zeta");
 
     // Paper mapping: Prover Round 4, publish evaluation payload for the future verifier relation.
     let shifted_zeta = domain.element(1) * zeta;
+    //计算点值
     let evaluations_at_zeta =
         evaluate_opening_payload(&wire_polynomials, &sigma_tag_polynomials, zeta);
     let shifted_evaluations =
         ShiftedEvaluations::new(grand_product_polynomial.evaluate(&shifted_zeta));
+
+
     transcript.absorb_phase_9_evaluations(&evaluations_at_zeta, &shifted_evaluations);
     let v = transcript.challenge_scalar(b"v");
 
@@ -439,12 +449,14 @@ fn sample_blinding_scalars() -> ProverBlindingScalars {
     let mut rng = thread_rng();
     ProverBlindingScalars {
         wire_a_constant: Fr::rand(&mut rng),
-        wire_a_linear: Fr::zero(),
+        wire_a_linear: Fr::rand(&mut rng),
         wire_b_constant: Fr::rand(&mut rng),
-        wire_b_linear: Fr::zero(),
+        wire_b_linear: Fr::rand(&mut rng),
         wire_c_constant: Fr::rand(&mut rng),
-        wire_c_linear: Fr::zero(),
-        grand_product: Fr::rand(&mut rng),
+        wire_c_linear: Fr::rand(&mut rng),
+        grand_product_constant: Fr::rand(&mut rng),
+        grand_product_linear: Fr::rand(&mut rng),
+        grand_product_quadratic: Fr::rand(&mut rng),
         quotient_first: Fr::rand(&mut rng),
         quotient_second: Fr::rand(&mut rng),
     }
@@ -489,7 +501,562 @@ struct ProverBlindingScalars {
     wire_b_linear: Fr,
     wire_c_constant: Fr,
     wire_c_linear: Fr,
-    grand_product: Fr,
+    grand_product_constant: Fr,
+    grand_product_linear: Fr,
+    grand_product_quadratic: Fr,
     quotient_first: Fr,
     quotient_second: Fr,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        cs::Circuit,
+        kzg::{KzgSrs, verify_opening},
+        permutation::build_sigma_from_copy_constraints,
+        quotient::{
+            blind_grand_product_polynomial, compute_blinded_quotient_polynomial,
+            rerandomize_quotient_chunks, split_quotient_polynomial,
+        },
+        types::{OpeningProof, VerifierPreprocessedInput, VerifierProtocolParams},
+        verifier::verify,
+    };
+    use ark_ec::AffineRepr;
+
+    #[test]
+    fn verifier_style_same_point_commitment_matches_direct_polynomial_commitment() {
+        let mut circuit = Circuit::new();
+        circuit
+            .add_gate(
+                Fr::from(3u64),
+                Fr::from(4u64),
+                Fr::from(7u64),
+                Fr::from(1u64),
+                Fr::from(1u64),
+                -Fr::from(1u64),
+                Fr::from(0u64),
+                Fr::from(0u64),
+            )
+            .unwrap();
+        circuit.pad_to_domain();
+
+        let domain_size = circuit.domain_size().unwrap();
+        let domain = build_domain_from_size(domain_size).unwrap();
+        let srs = KzgSrs::setup_for_testing((8 * domain_size).next_power_of_two()).unwrap();
+        let witness_columns = WitnessColumns::from_padded_circuit(&circuit).unwrap();
+        let selector_columns = SelectorColumns::from_padded_circuit(&circuit).unwrap();
+        let raw_wire_polynomials =
+            interpolate_witness_column_polynomials(&domain, &witness_columns).unwrap();
+        let selector_polynomials = build_selector_polynomials(&domain, &selector_columns).unwrap();
+        let sigma_mapping = build_sigma_from_copy_constraints(domain_size, &[]).unwrap();
+        let sigma_tag_polynomials = build_sigma_tag_polynomials(&domain, &sigma_mapping).unwrap();
+
+        let wire_polynomials = WitnessPolynomials {
+            wire_a_poly: blind_witness_polynomial(
+                &raw_wire_polynomials.wire_a_poly,
+                domain_size,
+                Fr::from(11u64),
+                Fr::from(0u64),
+            )
+            .unwrap(),
+            wire_b_poly: blind_witness_polynomial(
+                &raw_wire_polynomials.wire_b_poly,
+                domain_size,
+                Fr::from(13u64),
+                Fr::from(0u64),
+            )
+            .unwrap(),
+            wire_c_poly: blind_witness_polynomial(
+                &raw_wire_polynomials.wire_c_poly,
+                domain_size,
+                Fr::from(17u64),
+                Fr::from(0u64),
+            )
+            .unwrap(),
+        };
+
+        let beta = Fr::from(19u64);
+        let gamma = Fr::from(23u64);
+        let alpha = Fr::from(29u64);
+        let zeta = Fr::from(31u64);
+        let v = Fr::from(37u64);
+
+        let grand_product_evaluations = compute_grand_product_evaluations(
+            &witness_columns.wire_a_evaluations,
+            &witness_columns.wire_b_evaluations,
+            &witness_columns.wire_c_evaluations,
+            &sigma_mapping,
+            beta,
+            gamma,
+        )
+        .unwrap();
+        let raw_grand_product_polynomial = interpolate_grand_product_evaluations(
+            &grand_product_evaluations.grand_product_evaluations,
+            domain_size,
+        )
+        .unwrap();
+        let grand_product_polynomial = blind_grand_product_polynomial(
+            &raw_grand_product_polynomial,
+            domain_size,
+            Fr::from(41u64),
+            Fr::from(43u64),
+            Fr::from(47u64),
+        )
+        .unwrap();
+
+        let quotient_inputs = QuotientInputs::new(
+            witness_columns,
+            selector_columns,
+            sigma_mapping,
+            grand_product_evaluations,
+        )
+        .unwrap();
+        let quotient_polynomial = compute_blinded_quotient_polynomial(
+            &quotient_inputs,
+            &[],
+            alpha,
+            beta,
+            gamma,
+            &wire_polynomials,
+            &grand_product_polynomial,
+        )
+        .unwrap();
+        let quotient_chunks = rerandomize_quotient_chunks(
+            &split_quotient_polynomial(&quotient_polynomial, domain_size).unwrap(),
+            domain_size,
+            Fr::from(53u64),
+            Fr::from(59u64),
+        )
+        .unwrap();
+
+        let shifted_zeta = domain.group_gen() * zeta;
+        let evaluations_at_zeta =
+            evaluate_opening_payload(&wire_polynomials, &sigma_tag_polynomials, zeta);
+        let shifted_value = grand_product_polynomial.evaluate(&shifted_zeta);
+
+        let linearization_polynomial = build_linearization_polynomial(
+            &domain,
+            &selector_polynomials.q_l,
+            &selector_polynomials.q_r,
+            &selector_polynomials.q_o,
+            &selector_polynomials.q_m,
+            &selector_polynomials.q_c,
+            &sigma_tag_polynomials.wire_c,
+            &grand_product_polynomial,
+            &quotient_chunks,
+            &[],
+            alpha,
+            beta,
+            gamma,
+            zeta,
+            evaluations_at_zeta.wire_a,
+            evaluations_at_zeta.wire_b,
+            evaluations_at_zeta.wire_c,
+            evaluations_at_zeta.sigma_1,
+            evaluations_at_zeta.sigma_2,
+            shifted_value,
+        );
+        let w_z_polynomial = build_w_z_polynomial(
+            &linearization_polynomial,
+            &wire_polynomials,
+            &sigma_tag_polynomials,
+            &evaluations_at_zeta,
+            zeta,
+            v,
+        )
+        .unwrap();
+
+        let same_point_polynomial = linearization_polynomial.clone()
+            + scale_polynomial(&wire_polynomials.wire_a_poly, v)
+            + scale_polynomial(&wire_polynomials.wire_b_poly, v * v)
+            + scale_polynomial(&wire_polynomials.wire_c_poly, v * v * v)
+            + scale_polynomial(&sigma_tag_polynomials.wire_a, v * v * v * v)
+            + scale_polynomial(&sigma_tag_polynomials.wire_b, v * v * v * v * v);
+        let direct_commitment = commit_polynomial(&same_point_polynomial, &srs).unwrap();
+        let verifier_style_commitment = Commitment::from_projective(
+            commit_polynomial(&linearization_polynomial, &srs)
+                .unwrap()
+                .point
+                .into_group()
+                + commit_polynomial(&wire_polynomials.wire_a_poly, &srs)
+                    .unwrap()
+                    .point
+                    .into_group()
+                    * v
+                + commit_polynomial(&wire_polynomials.wire_b_poly, &srs)
+                    .unwrap()
+                    .point
+                    .into_group()
+                    * (v * v)
+                + commit_polynomial(&wire_polynomials.wire_c_poly, &srs)
+                    .unwrap()
+                    .point
+                    .into_group()
+                    * (v * v * v)
+                + commit_polynomial(&sigma_tag_polynomials.wire_a, &srs)
+                    .unwrap()
+                    .point
+                    .into_group()
+                    * (v * v * v * v)
+                + commit_polynomial(&sigma_tag_polynomials.wire_b, &srs)
+                    .unwrap()
+                    .point
+                    .into_group()
+                    * (v * v * v * v * v),
+        );
+
+        assert_eq!(direct_commitment, verifier_style_commitment);
+        assert!(
+            verify_opening(
+                &direct_commitment,
+                zeta,
+                same_point_polynomial.evaluate(&zeta),
+                &OpeningProof::new(commit_polynomial(&w_z_polynomial, &srs).unwrap()),
+                &srs,
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn same_point_opening_stays_consistent_with_public_inputs_and_copy_constraints() {
+        let left_public_input = Fr::from(5u64);
+        let right_public_input = Fr::from(9u64);
+        let public_inputs = vec![left_public_input, right_public_input];
+        let sum = left_public_input + right_public_input;
+        let mut circuit = Circuit::new();
+        circuit
+            .add_gate(
+                left_public_input,
+                Fr::from(0u64),
+                Fr::from(0u64),
+                -Fr::from(1u64),
+                Fr::from(0u64),
+                Fr::from(0u64),
+                Fr::from(0u64),
+                Fr::from(0u64),
+            )
+            .unwrap();
+        circuit
+            .add_gate(
+                right_public_input,
+                Fr::from(0u64),
+                Fr::from(0u64),
+                -Fr::from(1u64),
+                Fr::from(0u64),
+                Fr::from(0u64),
+                Fr::from(0u64),
+                Fr::from(0u64),
+            )
+            .unwrap();
+        circuit
+            .add_gate(
+                left_public_input,
+                right_public_input,
+                sum,
+                Fr::from(1u64),
+                Fr::from(1u64),
+                -Fr::from(1u64),
+                Fr::from(0u64),
+                Fr::from(0u64),
+            )
+            .unwrap();
+        circuit.pad_to_domain();
+
+        let copy_constraints = vec![
+            CopyConstraint {
+                left: crate::permutation::Pos {
+                    col: crate::permutation::Column::A,
+                    row: 0,
+                },
+                right: crate::permutation::Pos {
+                    col: crate::permutation::Column::A,
+                    row: 2,
+                },
+            },
+            CopyConstraint {
+                left: crate::permutation::Pos {
+                    col: crate::permutation::Column::A,
+                    row: 1,
+                },
+                right: crate::permutation::Pos {
+                    col: crate::permutation::Column::B,
+                    row: 2,
+                },
+            },
+        ];
+
+        let domain_size = circuit.domain_size().unwrap();
+        let domain = build_domain_from_size(domain_size).unwrap();
+        let srs = KzgSrs::setup_for_testing((8 * domain_size).next_power_of_two()).unwrap();
+        let witness_columns = WitnessColumns::from_padded_circuit(&circuit).unwrap();
+        let selector_columns = SelectorColumns::from_padded_circuit(&circuit).unwrap();
+        let raw_wire_polynomials =
+            interpolate_witness_column_polynomials(&domain, &witness_columns).unwrap();
+        let selector_polynomials = build_selector_polynomials(&domain, &selector_columns).unwrap();
+        let sigma_mapping =
+            build_sigma_from_copy_constraints(domain_size, &copy_constraints).unwrap();
+        let sigma_tag_polynomials = build_sigma_tag_polynomials(&domain, &sigma_mapping).unwrap();
+
+        let wire_polynomials = WitnessPolynomials {
+            wire_a_poly: blind_witness_polynomial(
+                &raw_wire_polynomials.wire_a_poly,
+                domain_size,
+                Fr::from(11u64),
+                Fr::from(0u64),
+            )
+            .unwrap(),
+            wire_b_poly: blind_witness_polynomial(
+                &raw_wire_polynomials.wire_b_poly,
+                domain_size,
+                Fr::from(13u64),
+                Fr::from(0u64),
+            )
+            .unwrap(),
+            wire_c_poly: blind_witness_polynomial(
+                &raw_wire_polynomials.wire_c_poly,
+                domain_size,
+                Fr::from(17u64),
+                Fr::from(0u64),
+            )
+            .unwrap(),
+        };
+
+        let transcript_input = build_transcript_preprocessed_input(
+            &domain,
+            &selector_polynomials,
+            &sigma_tag_polynomials,
+            &srs,
+        )
+        .unwrap();
+        let wire_commitments = commit_wire_polynomials(&wire_polynomials, &srs).unwrap();
+        let mut transcript = Transcript::default();
+        transcript.absorb_phase_9_preprocessed_input(&transcript_input);
+        transcript.absorb_plonk_public_inputs(public_inputs.as_slice());
+        transcript.absorb_plonk_wire_commitments(&wire_commitments);
+        let beta = transcript.challenge_scalar(b"beta");
+        let gamma = transcript.challenge_scalar(b"gamma");
+
+        let grand_product_evaluations = compute_grand_product_evaluations(
+            &witness_columns.wire_a_evaluations,
+            &witness_columns.wire_b_evaluations,
+            &witness_columns.wire_c_evaluations,
+            &sigma_mapping,
+            beta,
+            gamma,
+        )
+        .unwrap();
+        let raw_grand_product_polynomial = interpolate_grand_product_evaluations(
+            &grand_product_evaluations.grand_product_evaluations,
+            domain_size,
+        )
+        .unwrap();
+        let grand_product_polynomial = blind_grand_product_polynomial(
+            &raw_grand_product_polynomial,
+            domain_size,
+            Fr::from(41u64),
+            Fr::from(43u64),
+            Fr::from(47u64),
+        )
+        .unwrap();
+        let grand_product_commitment = commit_polynomial(&grand_product_polynomial, &srs).unwrap();
+        transcript.absorb_plonk_grand_product_commitment(&grand_product_commitment);
+        let alpha = transcript.challenge_scalar(b"alpha");
+
+        let quotient_inputs = QuotientInputs::new(
+            witness_columns,
+            selector_columns,
+            sigma_mapping,
+            grand_product_evaluations,
+        )
+        .unwrap();
+        let quotient_polynomial = compute_blinded_quotient_polynomial(
+            &quotient_inputs,
+            public_inputs.as_slice(),
+            alpha,
+            beta,
+            gamma,
+            &wire_polynomials,
+            &grand_product_polynomial,
+        )
+        .unwrap();
+        let quotient_chunks = rerandomize_quotient_chunks(
+            &split_quotient_polynomial(&quotient_polynomial, domain_size).unwrap(),
+            domain_size,
+            Fr::from(53u64),
+            Fr::from(59u64),
+        )
+        .unwrap();
+        let quotient_chunk_commitments =
+            commit_quotient_chunks(&quotient_chunks, &quotient_polynomial, &srs).unwrap();
+        transcript.absorb_phase_9_quotient_chunk_commitments(&quotient_chunk_commitments);
+        let zeta = transcript.challenge_scalar(b"zeta");
+        let shifted_zeta = domain.group_gen() * zeta;
+        let evaluations_at_zeta =
+            evaluate_opening_payload(&wire_polynomials, &sigma_tag_polynomials, zeta);
+        let shifted_value = grand_product_polynomial.evaluate(&shifted_zeta);
+        let shifted_evaluations = ShiftedEvaluations::new(shifted_value);
+        transcript.absorb_phase_9_evaluations(&evaluations_at_zeta, &shifted_evaluations);
+        let v = transcript.challenge_scalar(b"v");
+
+        let linearization_polynomial = build_linearization_polynomial(
+            &domain,
+            &selector_polynomials.q_l,
+            &selector_polynomials.q_r,
+            &selector_polynomials.q_o,
+            &selector_polynomials.q_m,
+            &selector_polynomials.q_c,
+            &sigma_tag_polynomials.wire_c,
+            &grand_product_polynomial,
+            &quotient_chunks,
+            public_inputs.as_slice(),
+            alpha,
+            beta,
+            gamma,
+            zeta,
+            evaluations_at_zeta.wire_a,
+            evaluations_at_zeta.wire_b,
+            evaluations_at_zeta.wire_c,
+            evaluations_at_zeta.sigma_1,
+            evaluations_at_zeta.sigma_2,
+            shifted_value,
+        );
+        let w_z_polynomial = build_w_z_polynomial(
+            &linearization_polynomial,
+            &wire_polynomials,
+            &sigma_tag_polynomials,
+            &evaluations_at_zeta,
+            zeta,
+            v,
+        )
+        .unwrap();
+
+        let same_point_polynomial = linearization_polynomial.clone()
+            + scale_polynomial(&wire_polynomials.wire_a_poly, v)
+            + scale_polynomial(&wire_polynomials.wire_b_poly, v * v)
+            + scale_polynomial(&wire_polynomials.wire_c_poly, v * v * v)
+            + scale_polynomial(&sigma_tag_polynomials.wire_a, v * v * v * v)
+            + scale_polynomial(&sigma_tag_polynomials.wire_b, v * v * v * v * v);
+        let verifier_style_commitment = Commitment::from_projective(
+            commit_polynomial(&linearization_polynomial, &srs)
+                .unwrap()
+                .point
+                .into_group()
+                + wire_commitments[0].point.into_group() * v
+                + wire_commitments[1].point.into_group() * (v * v)
+                + wire_commitments[2].point.into_group() * (v * v * v)
+                + commit_polynomial(&sigma_tag_polynomials.wire_a, &srs)
+                    .unwrap()
+                    .point
+                    .into_group()
+                    * (v * v * v * v)
+                + commit_polynomial(&sigma_tag_polynomials.wire_b, &srs)
+                    .unwrap()
+                    .point
+                    .into_group()
+                    * (v * v * v * v * v),
+        );
+        let direct_commitment = commit_polynomial(&same_point_polynomial, &srs).unwrap();
+
+        assert_eq!(direct_commitment, verifier_style_commitment);
+
+        assert!(
+            verify_opening(
+                &direct_commitment,
+                zeta,
+                same_point_polynomial.evaluate(&zeta),
+                &OpeningProof::new(commit_polynomial(&w_z_polynomial, &srs).unwrap()),
+                &srs,
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn prove_and_verify_stay_consistent_with_prover_side_fixed_data_construction() {
+        let left_public_input = Fr::from(5u64);
+        let right_public_input = Fr::from(9u64);
+        let public_inputs = vec![left_public_input, right_public_input];
+        let sum = left_public_input + right_public_input;
+        let mut circuit = Circuit::new();
+        circuit
+            .add_gate(
+                left_public_input,
+                Fr::from(0u64),
+                Fr::from(0u64),
+                -Fr::from(1u64),
+                Fr::from(0u64),
+                Fr::from(0u64),
+                Fr::from(0u64),
+                Fr::from(0u64),
+            )
+            .unwrap();
+        circuit
+            .add_gate(
+                right_public_input,
+                Fr::from(0u64),
+                Fr::from(0u64),
+                -Fr::from(1u64),
+                Fr::from(0u64),
+                Fr::from(0u64),
+                Fr::from(0u64),
+                Fr::from(0u64),
+            )
+            .unwrap();
+        circuit
+            .add_gate(
+                left_public_input,
+                right_public_input,
+                sum,
+                Fr::from(1u64),
+                Fr::from(1u64),
+                -Fr::from(1u64),
+                Fr::from(0u64),
+                Fr::from(0u64),
+            )
+            .unwrap();
+        circuit.pad_to_domain();
+
+        let copy_constraints = vec![
+            CopyConstraint {
+                left: crate::permutation::Pos {
+                    col: crate::permutation::Column::A,
+                    row: 0,
+                },
+                right: crate::permutation::Pos {
+                    col: crate::permutation::Column::A,
+                    row: 2,
+                },
+            },
+            CopyConstraint {
+                left: crate::permutation::Pos {
+                    col: crate::permutation::Column::A,
+                    row: 1,
+                },
+                right: crate::permutation::Pos {
+                    col: crate::permutation::Column::B,
+                    row: 2,
+                },
+            },
+        ];
+
+        let domain_size = circuit.domain_size().unwrap();
+        let domain = build_domain_from_size(domain_size).unwrap();
+        let srs = KzgSrs::setup_for_testing((8 * domain_size).next_power_of_two()).unwrap();
+        let selector_columns = SelectorColumns::from_padded_circuit(&circuit).unwrap();
+        let selector_polynomials = build_selector_polynomials(&domain, &selector_columns).unwrap();
+        let sigma_mapping =
+            build_sigma_from_copy_constraints(domain_size, &copy_constraints).unwrap();
+        let sigma_tag_polynomials = build_sigma_tag_polynomials(&domain, &sigma_mapping).unwrap();
+        let verifier_input = VerifierPreprocessedInput::new(
+            domain_params(&domain),
+            selector_polynomials,
+            sigma_tag_polynomials,
+            VerifierProtocolParams::new(3, [Fr::from(1u64), Fr::from(K1), Fr::from(K2)]),
+        );
+
+        let proof = prove(&circuit, &copy_constraints, public_inputs.clone(), &srs).unwrap();
+        assert!(verify(&proof, public_inputs.as_slice(), &verifier_input, &srs).unwrap());
+    }
 }

@@ -136,8 +136,8 @@ struct SigmaTagPolynomials {
 
 /// 功能说明：构造 quotient 计算专用的扩展 coset domain。
 /// 输入：原始约束域大小 `n`。
-/// 输出：大小为 `next_power_of_two(4 * n)` 的 coset domain。
-/// 示例：当 `n = 8` 时，扩展大小为 32。
+/// 输出：大小为 `next_power_of_two(8 * n)` 的 coset domain。
+/// 示例：当 `n = 8` 时，扩展大小为 64。
 /// 功能说明：构造商多项式（t）计算专用的“扩展陪集域 (Extended Coset Domain)”。
 /// 核心背景：
 /// 1. Plonk 的约束包含 a(x)*b(x)*q_m(x)，阶数约为 3n，聚合后可能接近 4n。
@@ -150,7 +150,7 @@ pub fn build_extended_quotient_domain(domain_size: usize) -> Result<PlonkDomain>
     // 为什么要乘 4？
     // 为了满足 FFT 的计算分辨率，采样点数必须 > 3n。为了代码方便，选 4n。
     let minimum_extended_size = domain_size
-        .checked_mul(4)
+        .checked_mul(8)
         .ok_or(PlonkError::InvalidInput("扩展域计算规模溢出"))?;
 
     // --- 第二步：对齐到 2 的幂次 ---
@@ -342,8 +342,15 @@ pub fn compute_blinded_quotient_polynomial(
     // Repo role: keep the H-domain zero check unchanged, but rebuild the extended-domain quotient
     // from the blinded witness and grand-product polynomials.
     let original_domain = build_domain_from_size(inputs.domain_size)?;
+    // 这个直接在coset extend群上了
     let extended_domain = build_extended_quotient_domain(inputs.domain_size)?;
-    let mut polynomials = interpolate_step_5_1_polynomials(inputs, public_inputs, &original_domain)?;
+    // （IFFT到原始 H 上）
+    let mut polynomials =
+        interpolate_step_5_1_polynomials(inputs, public_inputs, &original_domain)?;
+
+
+    // 关键点，这里已经将round1和round2的多项式切换成了带上blinding了。
+    // 修改round2和round1的多项式，因为加上blinding，所以次数会增加，只能在coset上计算。
     polynomials.witness_polynomials = WitnessPolynomials {
         wire_a_polynomial: blinded_witness_polynomials.wire_a_poly.clone(),
         wire_b_polynomial: blinded_witness_polynomials.wire_b_poly.clone(),
@@ -351,10 +358,16 @@ pub fn compute_blinded_quotient_polynomial(
     };
     polynomials.z_polynomial = blinded_grand_product_polynomial.clone();
 
+    // 计算第一行的点值（除了PI），但是没有多项式和分子
     let gate_term_evaluations =
         compute_gate_term_evaluations_on_extended_domain(&polynomials, &extended_domain);
+
+    // public input的点值在coset上（应该也算第一行里面吧）
     let public_input_term_evaluations =
         extend_poly_to_evals(&polynomials.public_input_polynomial, &extended_domain);
+
+
+    // 计算round3的第二行和第三行的evals，同理没有vanishing polynomial和alpha
     let permutation_term_evaluations = compute_permutation_term_evaluations_on_extended_domain(
         &polynomials,
         &original_domain,
@@ -362,12 +375,18 @@ pub fn compute_blinded_quotient_polynomial(
         beta,
         gamma,
     );
+
+    // 计算round3的第四行，这个与原文稍微有一点出入，有两项，校验是不是一个cycle
     let (boundary_term_1_evaluations, boundary_term_2_evaluations) =
         compute_boundary_term_evaluations_on_extended_domain(
             &polynomials,
             &original_domain,
             &extended_domain,
         );
+
+
+
+    // 计算整个分子
     let numerator_evaluations = aggregate_numerator_evaluations(
         &gate_term_evaluations,
         &public_input_term_evaluations,
@@ -376,11 +395,18 @@ pub fn compute_blinded_quotient_polynomial(
         &boundary_term_2_evaluations,
         alpha,
     )?;
+    // 计算分母了，也是点值
     let vanishing_evaluations =
         evaluate_h_vanishing_on_extended_domain(&original_domain, &extended_domain);
+
+
+
+
+    // 还是点值
     let quotient_evaluations =
         compute_quotient_evaluations(&numerator_evaluations, &vanishing_evaluations)?;
 
+    // IFFT
     evaluations_to_polynomial(&extended_domain, &quotient_evaluations)
 }
 
@@ -738,6 +764,8 @@ fn compute_permutation_term_evaluations_on_extended_domain(
     gamma: Fr,
 ) -> Vec<Fr> {
     // Paper mapping: quotient permutation term evaluated at X and omega*X on the extended domain.
+
+    //
     let omega = original_domain.group_gen();
     let k1 = Fr::from(K1);
     let k2 = Fr::from(K2);
@@ -976,9 +1004,15 @@ pub struct QuotientChunkPolynomials {
     pub t_hi: DensePolynomial<Fr>,
 }
 
-/// 功能说明：把完整 `T(X)` 按 Step 9.2 冻结边界切成 `T_lo/T_mid/T_hi`。
+/// 功能说明：把完整 `T(X)` 按 `t_lo + X^n t_mid + X^(2n) t_hi` 切成三个 chunk。
 /// 输入：完整 quotient polynomial 与原始 domain 大小 `n`。
-/// 输出：三个 degree `< n` 的 chunk 多项式。
+/// 输出：
+/// - `T_lo` 持有 `[0, n)` 系数
+/// - `T_mid` 持有 `[n, 2n)` 系数
+/// - `T_hi` 持有 `[2n, ..)` 的完整高次尾部
+///
+/// 这样 Step 10.2 在引入更强 blinding 后，即使 `T(X)` 的次数超过 `3n - 1`，
+/// 仍然不会把高次尾部静默截断。
 /// 示例：`split_quotient_polynomial(&t, n)?`。
 pub fn split_quotient_polynomial(
     quotient_polynomial: &DensePolynomial<Fr>,
@@ -986,7 +1020,8 @@ pub fn split_quotient_polynomial(
 ) -> Result<QuotientChunkPolynomials> {
     ensure(domain_size > 0, "domain_size must be positive")?;
 
-    let take_chunk = |chunk_index: usize| {
+    // 闭包
+    let take_fixed_chunk = |chunk_index: usize| {
         let start = chunk_index * domain_size;
         let mut coeffs = vec![Fr::zero(); domain_size];
         for (offset, coefficient) in quotient_polynomial
@@ -998,14 +1033,49 @@ pub fn split_quotient_polynomial(
         {
             coeffs[offset] = *coefficient;
         }
+        // 闭包返回的值
         DensePolynomial::from_coefficients_vec(trim_trailing_zeros(coeffs))
     };
 
-    Ok(QuotientChunkPolynomials {
-        t_lo: take_chunk(0),
-        t_mid: take_chunk(1),
-        t_hi: take_chunk(2),
-    })
+    // 定义一个不带参数的闭包 ||
+    // 它会自动从环境中“捕获” quotient_polynomial 和 domain_size
+    let take_tail_chunk = || {
+        // 1. 确定起点：t_hi 应该从 X^{2n} 的系数开始拿
+        let start = 2 * domain_size;
+
+        // 2. 使用迭代器进行“手术采样”
+        let coeffs: Vec<Fr> = quotient_polynomial
+            .coeffs             // 访问原始多项式的系数向量 [c0, c1, c2, ...]
+            .iter()             // 变成一个“传送带” (迭代器)
+            .skip(start)        // 跳过前 2n 个系数（即跳过 t_lo 和 t_mid 的部分）
+            .copied()           // 把 &Fr (引用) 复制成 Fr (值)，因为 collect 需要拥有所有权
+            .collect();         // 把剩下的所有系数（从 2n 到末尾）收集进一个新的 Vec
+
+        // 3. 边界处理：万一 t(X) 的阶数刚好小于 2n，后面没东西了
+        if coeffs.is_empty() {
+            // 返回一个常数 0 多项式，防止程序因为数组为空而崩溃
+            DensePolynomial::from_coefficients_vec(vec![Fr::zero()])
+        } else {
+            // 4. 正常返回：构造新多项式，并顺便修剪掉末尾无用的零
+            // trim_trailing_zeros 确保多项式的 degree() 返回的是真实有效的值
+            // 去掉了0，也就是这个vec一定是n
+            DensePolynomial::from_coefficients_vec(trim_trailing_zeros(coeffs))
+        }
+    };
+    let result = QuotientChunkPolynomials {
+        t_lo: take_fixed_chunk(0),
+        t_mid: take_fixed_chunk(1),
+        t_hi: take_tail_chunk(),
+    };
+    // --- 最终收尾校验 ---
+    // 确保切开后的最高阶部分 t_hi，它的 degree 依然在 n 范围内（允许微量盲化 buffer）
+    // 如果这里报错，说明即便之前的总长度没超，但这部分数据不对劲。
+    ensure(domain_size > 0, "domain_size must be positive")?;
+    ensure(
+        result.t_hi.coeffs.len() <= domain_size + 8,
+        "t_hi.coeffs is too big"
+    )?;
+    Ok(result)
 }
 
 /// 功能说明：给 witness polynomial 添加 `(c0 + c1 * X) * Z_H(X)` 形式的最小 blind。
@@ -1017,7 +1087,8 @@ pub fn blind_witness_polynomial(
     domain_size: usize,               // 输入：Domain 的大小 n
     constant_blinder: Fr,             // 输入：随机标量 c0
     linear_blinder: Fr,               // 输入：随机标量 c1
-) -> Result<DensePolynomial<Fr>> {    // 返回：包装在 Result 中的新多项式
+) -> Result<DensePolynomial<Fr>> {
+    // 返回：包装在 Result 中的新多项式
     // 1. 安全检查，防止 domain 为 0 导致溢出或错误
     ensure(domain_size > 0, "domain_size must be positive")?;
 
@@ -1044,21 +1115,27 @@ pub fn blind_witness_polynomial(
         coefficients,
     )))
 }
-/// 功能说明：给 grand product polynomial 添加 `r * Z_H(X)` 形式的最小 blind。
-/// 输入：原始 `Z(X)`、原始 domain 大小、一个随机标量。
+/// 功能说明：给 grand product polynomial 添加 `(c0 + c1 * X + c2 * X^2) * Z_H(X)` 形式的 blind。
+/// 输入：原始 `Z(X)`、原始 domain 大小、三个随机标量。
 /// 输出：在 H 上保持同值的 blinded `Z(X)`。
-/// 示例：`blind_grand_product_polynomial(&z_raw, n, r_z)`。
+/// 示例：`blind_grand_product_polynomial(&z_raw, n, c0, c1, c2)`。
 pub fn blind_grand_product_polynomial(
     polynomial: &DensePolynomial<Fr>,
     domain_size: usize,
-    blinder: Fr,
+    constant_blinder: Fr,
+    linear_blinder: Fr,
+    quadratic_blinder: Fr,
 ) -> Result<DensePolynomial<Fr>> {
     ensure(domain_size > 0, "domain_size must be positive")?;
 
     let mut coefficients = polynomial.coeffs.clone();
-    coefficients.resize(domain_size + 1, Fr::zero());
-    coefficients[0] -= blinder;
-    coefficients[domain_size] += blinder;
+    coefficients.resize(domain_size + 3, Fr::zero());
+    coefficients[0] -= constant_blinder;
+    coefficients[1] -= linear_blinder;
+    coefficients[2] -= quadratic_blinder;
+    coefficients[domain_size] += constant_blinder;
+    coefficients[domain_size + 1] += linear_blinder;
+    coefficients[domain_size + 2] += quadratic_blinder;
 
     Ok(DensePolynomial::from_coefficients_vec(trim_trailing_zeros(
         coefficients,
@@ -1078,6 +1155,7 @@ pub fn rerandomize_quotient_chunks(
     ensure(domain_size > 0, "domain_size must be positive")?;
 
     let mut t_lo_coefficients = quotient_chunks.t_lo.coeffs.clone();
+    // 多项式系数提升增加了
     t_lo_coefficients.resize(domain_size + 1, Fr::zero());
     t_lo_coefficients[domain_size] += first_blinder;
 

@@ -383,13 +383,13 @@ fn h_domain_public_input_term_binds_statement_into_main_constraints() {
     assert!(has_nonzero(&mismatched.numerator_evaluations));
 }
 
-/// 扩展 quotient domain 的大小应固定为 next_power_of_two(4 * n)。
+/// 扩展 quotient domain 的大小应固定为 next_power_of_two(8 * n)。
 #[test]
-fn extended_quotient_domain_uses_next_power_of_two_of_four_n() {
+fn extended_quotient_domain_uses_next_power_of_two_of_eight_n() {
     let inputs = build_valid_inputs();
     let domain = build_extended_quotient_domain(inputs.domain_size)
         .expect("extended quotient domain should build");
-    assert_eq!(domain.size(), (4 * inputs.domain_size).next_power_of_two());
+    assert_eq!(domain.size(), (8 * inputs.domain_size).next_power_of_two());
 }
 
 /// 对正确 witness，extended-domain 上应满足 quotient * Z_H == numerator。
@@ -450,6 +450,6 @@ fn step_5_1_output_contains_both_layers() {
     );
     assert_eq!(
         output.extended_domain.extended_domain_size,
-        (4 * inputs.domain_size).next_power_of_two()
+        (8 * inputs.domain_size).next_power_of_two()
     );
 }

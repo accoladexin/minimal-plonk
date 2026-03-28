@@ -91,7 +91,7 @@ fn build_public_input_copy_circuit(
 }
 
 fn sample_srs(domain_size: usize) -> KzgSrs {
-    let extended_size = (4 * domain_size).next_power_of_two();
+    let extended_size = (8 * domain_size).next_power_of_two();
     KzgSrs::setup_for_testing(extended_size).expect("testing srs should build")
 }
 
