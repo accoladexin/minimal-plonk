@@ -11,7 +11,7 @@ mod verifier_input;
 pub use config::{DomainParams, PlonkConfig, TranscriptHash};
 pub use proof::{
     Commitment, EvaluationsAtZeta, OpeningCommitments, OpeningProof, PlonkProof, ProofSkeleton,
-    QuotientChunkCommitments, ShiftedEvaluations,
+    QuotientChunkCommitments,
 };
 pub use quotient_input::QuotientInputs;
 pub use verifier_input::{

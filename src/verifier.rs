@@ -8,7 +8,7 @@
 
 use ark_ec::{AffineRepr, CurveGroup, Group, pairing::Pairing};
 use ark_ff::{Field, Zero};
-use ark_poly::{EvaluationDomain, Polynomial};
+use ark_poly::EvaluationDomain;
 
 use crate::{
     curve::{Curve, Fr, G1},
@@ -58,6 +58,7 @@ pub fn verify(
 
     // 这里和原文的plonk有点出入
     // 这是是严格按照kzg的去计算的，这是计算r(x)的commint，原文是r'(x)其中，r‘(x)=r(x)-常数项目的
+
     let linearization_commitment = build_linearization_commitment(
         proof,
         verifier_input,
@@ -78,39 +79,29 @@ pub fn verify(
     );
 
 
-    // step 11 ，r'(x) 这一个部分
+    // step 11 r(x)这一部分
     let same_point_value = build_same_point_value(proof, challenges.v);
 
-    // Paper mapping: the linearization relation claims `r(zeta) = 0`.
-    // Repo role: the current Step 9.3 landing keeps the `boundary_2` image on the scalar side,
-    // so verifier must reconstruct that exact claimed `r(zeta)` value instead of forcing zero.
-    // 计算- alpha^3 * (Z(omega * zeta) - 1) * L_{n-1}(zeta)
-    // 我就是我自己添加的这一项，都是常数项目 也就是scalar
-    let linearization_value =
-        evaluate_linearization_value(proof, challenges.alpha, challenges.zeta, &domain);
 
-    // 自己添加+论文的这一项
-    let expected_same_point_value = linearization_value + same_point_value;
-
-    let _a = same_point_commitment.point.into_group()
-        - (G1::generator() * expected_same_point_value);
-
-
+    // g1 ** zeta
     let shifted_zeta = domain.group_gen() * challenges.zeta;
 
+    let f_commitment_term = same_point_commitment.point.into_group()
+        + scale_commitment_group(&proof.grand_product_commitment, challenges.u);
+    let e_scalar_term = (G1::generator() * same_point_value)
+        + (G1::generator() * (challenges.u * proof.grand_product_at_zeta_omega));
 
     // Paper mapping: aggregate the `zeta` and `omega * zeta` openings with transcript challenge `u`.
     // Implementation note: this keeps the `W_z / W_{z omega} + u` structure readable instead of
     // hiding it behind a Step 8 style helper.
-    let left_group = same_point_commitment.point.into_group()
-        - (G1::generator() * expected_same_point_value)
-        + scale_commitment_group(&proof.grand_product_commitment, challenges.u)
-        - (G1::generator() * (challenges.u * proof.shifted_evaluations.grand_product_next))
-        + scale_commitment_group(&proof.opening_commitments.at_zeta, challenges.zeta)
+    // Formula shape: left_group = zeta*W_z + u*(omega*zeta)*W_{z omega} + F - E.
+    let left_group = scale_commitment_group(&proof.opening_commitments.at_zeta, challenges.zeta)
         + scale_commitment_group(
             &proof.opening_commitments.at_shifted_zeta,
             challenges.u * shifted_zeta,
-        );
+        )
+        + f_commitment_term
+        - e_scalar_term;
     let right_group = proof.opening_commitments.at_zeta.point.into_group()
         + scale_commitment_group(&proof.opening_commitments.at_shifted_zeta, challenges.u);
 
@@ -120,45 +111,6 @@ pub fn verify(
     let right_pairing = Curve::pairing(right_group.into_affine(), srs.g2_powers[1]);
 
     Ok(left_pairing == right_pairing)
-}
-
-/// Reconstruct the scalar-side `r(zeta)` value expected by the landed Step 9.3 prover.
-///  功能：重建线性化多项式 r(X) 在挑战点 zeta 处的纯标量分量。
-//  背景：
-//  线性化多项式 r(X) = Gate(X) + alpha*Perm(X) + alpha^2*Bound1(X) + alpha^3*Bound2(X) - t(X)Z_H(X)。
-//  其中，某些项在 Verifier 看来已经是确定的常数了。
-fn evaluate_linearization_value(
-    proof: &PlonkProof,
-    alpha: Fr,
-    zeta: Fr,
-    domain: &PlonkDomain,
-) -> Fr {
-    // Paper mapping: this is the scalar image of the part not carried inside `[R]`.
-    // Implementation note: Step 9.3 keeps the `boundary_2` term here, so Step 9.4 must
-    // replay the same landed prover boundary instead of silently changing it.
-    // 1. 获取全套拉格朗日基函数在 zeta 点的值。
-    // 这就像是在随机点 zeta 处放置了 n 个探针，测量每一行的“权重”。
-    let lagrange_values = domain.evaluate_all_lagrange_coefficients(zeta);
-
-    // 2. 提取最后一行（第 n-1 行）的拉格朗日系数 L_{n-1}(zeta)。
-    // 作用：它是“收尾约束”的开关。只有在这一项，我们检查 Z 累乘是否回到了 1。
-
-    let l_n_minus_1_at_zeta = lagrange_values[domain.size() - 1];
-
-    // 3. 计算聚合挑战值 alpha 的 3 次方。
-    // 对应聚合公式中的第四项：alpha^3 * (Z(omega * X) - 1) * L_{n-1}(X)。
-    let alpha_cube = alpha * alpha * alpha;
-
-    // 4. 计算纯标量项的结果：
-    // 公式：- alpha^3 * (Z(omega * zeta) - 1) * L_{n-1}(zeta)
-    //
-    // 为什么是负号？：因为在 linearized 承诺 [R] 的构造中，通常把 Numerator - t*ZH
-    // 里的某些项挪到了 scalar side 来进行最终求值。
-    //
-    // proof.shifted_evaluations.grand_product_next：就是 Z(omega * zeta) 的值，由 Prover 直接提供。
-    -alpha_cube
-        * (proof.shifted_evaluations.grand_product_next - Fr::from(1u64))
-        * l_n_minus_1_at_zeta
 }
 
 /// Build and validate the domain reconstructed from verifier fixed data.
@@ -218,7 +170,6 @@ fn build_linearization_commitment(
     // Paper mapping: this is the verifier-side image of the prover linearization polynomial `r(X)`.
     // Repo role: we reconstruct `[R]` from fixed commitments plus proof commitments instead of
     // requiring the verifier to know witness polynomials.
-    let selector_evaluations = evaluate_selector_polynomials_at_zeta(verifier_input, zeta);
     let public_input_at_zeta =
         evaluate_public_input_polynomial_at_point(domain, public_inputs, zeta);
 
@@ -237,7 +188,7 @@ fn build_linearization_commitment(
     let c_at_zeta = proof.evaluations_at_zeta.wire_c;
     let sigma_1_at_zeta = proof.evaluations_at_zeta.sigma_1;
     let sigma_2_at_zeta = proof.evaluations_at_zeta.sigma_2;
-    let z_at_omega_zeta = proof.shifted_evaluations.grand_product_next;
+    let z_at_omega_zeta = proof.grand_product_at_zeta_omega;
 
     // 在通用多项式中 qm*a*b
     let gate_scalar_q_m = a_at_zeta * b_at_zeta;
@@ -301,20 +252,6 @@ fn build_linearization_commitment(
     Commitment::from_projective(linearization_group)
 }
 
-/// Evaluate all selector polynomials at `zeta`.
-fn evaluate_selector_polynomials_at_zeta(
-    verifier_input: &VerifierPreprocessedInput,
-    zeta: Fr,
-) -> SelectorEvaluationsAtZeta {
-    SelectorEvaluationsAtZeta {
-        q_l: verifier_input.selector_polynomials.q_l.evaluate(&zeta),
-        q_r: verifier_input.selector_polynomials.q_r.evaluate(&zeta),
-        q_o: verifier_input.selector_polynomials.q_o.evaluate(&zeta),
-        q_m: verifier_input.selector_polynomials.q_m.evaluate(&zeta),
-        q_c: verifier_input.selector_polynomials.q_c.evaluate(&zeta),
-    }
-}
-
 /// Aggregate `[R]` with the same-point commitments opened at `zeta`.
 /// step10，对于第一个第一组多项式的commint组合
 fn build_same_point_commitment(
@@ -335,8 +272,10 @@ fn build_same_point_commitment(
 }
 
 /// Build the same-point scalar aggregate at `zeta`, excluding `r(zeta)`.
+
 fn build_same_point_value(proof: &PlonkProof, v: Fr) -> Fr {
     // Paper mapping: `r(zeta) + v*a(zeta) + ... + v^5*S_sigma2(zeta)`.
+    // 因为第一项的常数为0
     v * proof.evaluations_at_zeta.wire_a
         + v * v * proof.evaluations_at_zeta.wire_b
         + v * v * v * proof.evaluations_at_zeta.wire_c
@@ -353,13 +292,3 @@ fn scale_commitment_group(commitment: &Commitment, scalar: Fr) -> G1 {
 fn commitment_from_scalar(scalar: Fr) -> G1 {
     G1::generator() * scalar
 }
-
-/// Small bundle of selector evaluations reused in verifier aggregation code.
-struct SelectorEvaluationsAtZeta {
-    q_l: Fr,
-    q_r: Fr,
-    q_o: Fr,
-    q_m: Fr,
-    q_c: Fr,
-}
-

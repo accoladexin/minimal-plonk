@@ -32,8 +32,8 @@ use crate::{
     transcript::Transcript,
     types::{
         Commitment, EvaluationsAtZeta, OpeningCommitments, PlonkProof, QuotientChunkCommitments,
-        QuotientInputs, SelectorPolynomials, ShiftedEvaluations, SigmaTagPolynomials,
-        TranscriptPreprocessedInput, VerifierProtocolParams,
+        QuotientInputs, SelectorPolynomials, SigmaTagPolynomials, TranscriptPreprocessedInput,
+        VerifierProtocolParams,
     },
     validate::ensure,
     witness::{
@@ -181,11 +181,10 @@ pub fn prove(
     //计算点值
     let evaluations_at_zeta =
         evaluate_opening_payload(&wire_polynomials, &sigma_tag_polynomials, zeta);
-    let shifted_evaluations =
-        ShiftedEvaluations::new(grand_product_polynomial.evaluate(&shifted_zeta));
+    let grand_product_at_zeta_omega = grand_product_polynomial.evaluate(&shifted_zeta);
 
 
-    transcript.absorb_phase_9_evaluations(&evaluations_at_zeta, &shifted_evaluations);
+    transcript.absorb_phase_9_evaluations(&evaluations_at_zeta, &grand_product_at_zeta_omega);
     let v = transcript.challenge_scalar(b"v");
 
     // Paper mapping: Prover Round 5, construct the explicit linearization polynomial r(X).
@@ -209,7 +208,7 @@ pub fn prove(
         evaluations_at_zeta.wire_c,
         evaluations_at_zeta.sigma_1,
         evaluations_at_zeta.sigma_2,
-        shifted_evaluations.grand_product_next,
+        grand_product_at_zeta_omega,
     );
     let w_z_polynomial = build_w_z_polynomial(
         &linearization_polynomial,
@@ -222,7 +221,7 @@ pub fn prove(
     let w_z_omega_polynomial = build_w_z_omega_polynomial(
         &grand_product_polynomial,
         shifted_zeta,
-        shifted_evaluations.grand_product_next,
+        grand_product_at_zeta_omega,
     )?;
     let opening_commitments = OpeningCommitments::new(
         commit_polynomial(&w_z_polynomial, srs)?,
@@ -237,7 +236,7 @@ pub fn prove(
         quotient_chunk_commitments,
         opening_commitments,
         evaluations_at_zeta,
-        shifted_evaluations,
+        grand_product_at_zeta_omega,
     ))
 }
 
@@ -896,8 +895,7 @@ mod tests {
         let evaluations_at_zeta =
             evaluate_opening_payload(&wire_polynomials, &sigma_tag_polynomials, zeta);
         let shifted_value = grand_product_polynomial.evaluate(&shifted_zeta);
-        let shifted_evaluations = ShiftedEvaluations::new(shifted_value);
-        transcript.absorb_phase_9_evaluations(&evaluations_at_zeta, &shifted_evaluations);
+        transcript.absorb_phase_9_evaluations(&evaluations_at_zeta, &shifted_value);
         let v = transcript.challenge_scalar(b"v");
 
         let linearization_polynomial = build_linearization_polynomial(

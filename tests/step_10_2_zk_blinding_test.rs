@@ -234,7 +234,7 @@ fn blinded_proof_verifies_with_non_empty_copy_constraints() {
         verify_opening(
             &fixture.proof.grand_product_commitment,
             shifted_zeta,
-            fixture.proof.shifted_evaluations.grand_product_next,
+            fixture.proof.grand_product_at_zeta_omega,
             &minimal_plonk::types::OpeningProof::new(
                 fixture.proof.opening_commitments.at_shifted_zeta.clone(),
             ),
@@ -254,14 +254,7 @@ fn blinded_proof_verifies_with_non_empty_copy_constraints() {
     );
     let same_point_commitment =
         build_same_point_commitment_for_test(&linearization_commitment, &fixture.proof, &fixture.transcript_input, challenges.v);
-    let boundary_value = evaluate_boundary_linearization_value_for_test(
-        &fixture.proof,
-        challenges.alpha,
-        challenges.zeta,
-        fixture.circuit.domain_size().unwrap(),
-    );
-    let same_point_value = boundary_value
-        + build_same_point_value_for_test(&fixture.proof, challenges.v);
+    let same_point_value = build_same_point_value_for_test(&fixture.proof, challenges.v);
     assert!(
         verify_opening(
             &same_point_commitment,
@@ -428,7 +421,7 @@ fn tampering_blinded_wire_evaluations_breaks_verification() {
 fn tampering_blinded_shifted_grand_product_breaks_verification() {
     let fixture = sample_fixture();
     let mut proof = fixture.proof.clone();
-    proof.shifted_evaluations.grand_product_next += Fr::from(1u64);
+    proof.grand_product_at_zeta_omega += Fr::from(1u64);
 
     assert!(
         !verify(
@@ -537,7 +530,7 @@ fn build_linearization_commitment_for_test(
     let c_at_zeta = proof.evaluations_at_zeta.wire_c;
     let sigma_1_at_zeta = proof.evaluations_at_zeta.sigma_1;
     let sigma_2_at_zeta = proof.evaluations_at_zeta.sigma_2;
-    let z_at_omega_zeta = proof.shifted_evaluations.grand_product_next;
+    let z_at_omega_zeta = proof.grand_product_at_zeta_omega;
 
     let gate_scalar_q_m = a_at_zeta * b_at_zeta;
     let gate_scalar_q_l = a_at_zeta;
@@ -601,19 +594,4 @@ fn build_same_point_value_for_test(proof: &minimal_plonk::types::PlonkProof, v: 
         + v * v * v * proof.evaluations_at_zeta.wire_c
         + v * v * v * v * proof.evaluations_at_zeta.sigma_1
         + v * v * v * v * v * proof.evaluations_at_zeta.sigma_2
-}
-
-fn evaluate_boundary_linearization_value_for_test(
-    proof: &minimal_plonk::types::PlonkProof,
-    alpha: Fr,
-    zeta: Fr,
-    domain_size: usize,
-) -> Fr {
-    let domain = build_domain_from_size(domain_size).unwrap();
-    let lagrange_values = domain.evaluate_all_lagrange_coefficients(zeta);
-    let l_n_minus_1_at_zeta = lagrange_values[domain.size() - 1];
-    let alpha_cube = alpha * alpha * alpha;
-    -alpha_cube
-        * (proof.shifted_evaluations.grand_product_next - Fr::from(1u64))
-        * l_n_minus_1_at_zeta
 }

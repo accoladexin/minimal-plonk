@@ -9,7 +9,7 @@ use minimal_plonk::{
     transcript::Transcript,
     types::{
         Commitment, DomainParams, EvaluationsAtZeta, OpeningCommitments, PlonkConfig, PlonkProof,
-        QuotientChunkCommitments, ShiftedEvaluations, TranscriptHash,
+        QuotientChunkCommitments, TranscriptHash,
     },
 };
 
@@ -51,7 +51,7 @@ fn sample_proof() -> PlonkProof {
             Fr::from(34u64),
             Fr::from(55u64),
         ),
-        ShiftedEvaluations::new(Fr::from(89u64)),
+        Fr::from(89u64),
     )
 }
 

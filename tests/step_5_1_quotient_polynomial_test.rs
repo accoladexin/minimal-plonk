@@ -322,7 +322,7 @@ fn h_domain_boundary_failure_makes_numerator_nonzero() {
         .grand_product_evaluations
         .grand_product_evaluations
         .clone();
-    broken_z_values[inputs.domain_size] = Fr::from(2u64);
+    broken_z_values[0] = Fr::from(2u64);
     let broken_z = GrandProductEvaluations {
         domain_size: inputs.domain_size,
         grand_product_evaluations: broken_z_values,
@@ -345,7 +345,7 @@ fn h_domain_boundary_failure_makes_numerator_nonzero() {
     )
     .expect("H-domain constraints should compute");
 
-    assert!(has_nonzero(&output.boundary_term_2_evaluations));
+    assert!(has_nonzero(&output.boundary_term_1_evaluations));
     assert!(has_nonzero(&output.numerator_evaluations));
 }
 

@@ -44,7 +44,6 @@ pub struct HDomainConstraintEvaluations {
     /// `Z(1) = 1` 这条 boundary 约束在 H 上的编码结果。
     pub boundary_term_1_evaluations: Vec<Fr>,
     /// `Z(omega^n) = 1` 这条 closing boundary 约束在 H 上的编码结果。
-    pub boundary_term_2_evaluations: Vec<Fr>,
     /// 按 alpha 幂次聚合后的 numerator 在 H 上的值。
     pub numerator_evaluations: Vec<Fr>,
 }
@@ -70,7 +69,6 @@ pub struct ExtendedDomainQuotientComputation {
     /// 第一个 boundary 约束在扩展 domain 上的 evaluations。
     pub boundary_term_1_evaluations: Vec<Fr>,
     /// 第二个 boundary 约束在扩展 domain 上的 evaluations。
-    pub boundary_term_2_evaluations: Vec<Fr>,
     /// 聚合后的真实 numerator 在扩展 domain 上的 evaluations。
     pub numerator_evaluations: Vec<Fr>,
     /// 由扩展 domain 上的 numerator evaluations 插值得到的 numerator polynomial。
@@ -105,7 +103,6 @@ struct Step5_1Polynomials {
     sigma_tag_polynomials: SigmaTagPolynomials,
     z_polynomial: DensePolynomial<Fr>,
     l_0_polynomial: DensePolynomial<Fr>,
-    l_n_minus_1_polynomial: DensePolynomial<Fr>,
 }
 
 /// witness 三列多项式。
@@ -201,8 +198,8 @@ pub fn compute_h_domain_constraint_evaluations(
     // permutation约束
     let permutation_term_evaluations =
         compute_permutation_term_evaluations_on_h(inputs, &original_domain, beta, gamma)?;
-    // boundary约束，比原文多了一个最后的校验点，确保 Z(omega^n) = 1 也被正确编码
-    let (boundary_term_1_evaluations, boundary_term_2_evaluations) =
+    // boundary 约束：按论文当前保留 `(Z(X) - 1) * L_0(X)` 这一项。
+    let boundary_term_1_evaluations =
         compute_boundary_term_evaluations_on_h(inputs, &original_domain)?;
 
     let numerator_evaluations = aggregate_numerator_evaluations(
@@ -210,7 +207,6 @@ pub fn compute_h_domain_constraint_evaluations(
         &public_input_term_evaluations,
         &permutation_term_evaluations,
         &boundary_term_1_evaluations,
-        &boundary_term_2_evaluations,
         alpha,
     )?;
 
@@ -220,7 +216,6 @@ pub fn compute_h_domain_constraint_evaluations(
         public_input_term_evaluations,
         permutation_term_evaluations,
         boundary_term_1_evaluations,
-        boundary_term_2_evaluations,
         numerator_evaluations,
     })
 }
@@ -258,19 +253,17 @@ pub fn compute_extended_domain_quotient(
         gamma,
     );
     //boundary约束
-    let (boundary_term_1_evaluations, boundary_term_2_evaluations) =
-        compute_boundary_term_evaluations_on_extended_domain(
-            &polynomials,
-            &original_domain,
-            &extended_domain,
-        );
+    let boundary_term_1_evaluations = compute_boundary_term_evaluations_on_extended_domain(
+        &polynomials,
+        &original_domain,
+        &extended_domain,
+    );
     // 分子
     let numerator_evaluations = aggregate_numerator_evaluations(
         &gate_term_evaluations,
         &public_input_term_evaluations,
         &permutation_term_evaluations,
         &boundary_term_1_evaluations,
-        &boundary_term_2_evaluations,
         alpha,
     )?;
     // IFFT到多项式
@@ -292,7 +285,6 @@ pub fn compute_extended_domain_quotient(
         public_input_term_evaluations,
         permutation_term_evaluations,
         boundary_term_1_evaluations,
-        boundary_term_2_evaluations,
         numerator_evaluations,
         numerator_polynomial,
         vanishing_evaluations,
@@ -376,13 +368,12 @@ pub fn compute_blinded_quotient_polynomial(
         gamma,
     );
 
-    // 计算round3的第四行，这个与原文稍微有一点出入，有两项，校验是不是一个cycle
-    let (boundary_term_1_evaluations, boundary_term_2_evaluations) =
-        compute_boundary_term_evaluations_on_extended_domain(
-            &polynomials,
-            &original_domain,
-            &extended_domain,
-        );
+    // 计算 round3 的 boundary 行，当前仅保留论文这条 `(Z(X) - 1) * L_0(X)`。
+    let boundary_term_1_evaluations = compute_boundary_term_evaluations_on_extended_domain(
+        &polynomials,
+        &original_domain,
+        &extended_domain,
+    );
 
 
 
@@ -392,7 +383,6 @@ pub fn compute_blinded_quotient_polynomial(
         &public_input_term_evaluations,
         &permutation_term_evaluations,
         &boundary_term_1_evaluations,
-        &boundary_term_2_evaluations,
         alpha,
     )?;
     // 计算分母了，也是点值
@@ -491,11 +481,6 @@ fn interpolate_step_5_1_polynomials(
         original_domain,
         &build_one_hot_selector(inputs.domain_size, 0)?,
     )?;
-    let l_n_minus_1_polynomial = evaluations_to_polynomial(
-        original_domain,
-        &build_one_hot_selector(inputs.domain_size, inputs.domain_size - 1)?,
-    )?;
-
     Ok(Step5_1Polynomials {
         witness_polynomials,
         selector_polynomials,
@@ -503,7 +488,6 @@ fn interpolate_step_5_1_polynomials(
         sigma_tag_polynomials,
         z_polynomial,
         l_0_polynomial,
-        l_n_minus_1_polynomial,
     })
 }
 
@@ -610,8 +594,8 @@ fn compute_permutation_term_evaluations_on_h(
 fn compute_boundary_term_evaluations_on_h(
     inputs: &QuotientInputs,
     original_domain: &PlonkDomain,
-) -> Result<(Vec<Fr>, Vec<Fr>)> {
-    // Paper mapping: permutation boundary relations Z(1)=1 and Z(omega^n)=1.
+) -> Result<Vec<Fr>> {
+    // Paper mapping: permutation boundary relation Z(1)=1.
     let domain_size = inputs.domain_size;
     let z_evaluations = &inputs.grand_product_evaluations.grand_product_evaluations;
     ensure(
@@ -623,21 +607,13 @@ fn compute_boundary_term_evaluations_on_h(
         original_domain,
         &build_one_hot_selector(domain_size, 0)?,
     );
-    let l_n_minus_1_evaluations = evaluate_selector_polynomial_on_original_domain(
-        original_domain,
-        &build_one_hot_selector(domain_size, domain_size - 1)?,
-    );
-
     let mut boundary_term_1_evaluations = Vec::with_capacity(domain_size);
-    let mut boundary_term_2_evaluations = Vec::with_capacity(domain_size);
     for row_index in 0..domain_size {
         let term_1 = (z_evaluations[row_index] - one) * l_0_evaluations[row_index];
-        let term_2 = (z_evaluations[row_index + 1] - one) * l_n_minus_1_evaluations[row_index];
         boundary_term_1_evaluations.push(term_1);
-        boundary_term_2_evaluations.push(term_2);
     }
 
-    Ok((boundary_term_1_evaluations, boundary_term_2_evaluations))
+    Ok(boundary_term_1_evaluations)
 }
 
 /// 功能说明：在扩展 domain 上计算 gate 约束的真实 evaluations。
@@ -772,7 +748,7 @@ fn compute_permutation_term_evaluations_on_extended_domain(
     let mut permutation_term_evaluations = Vec::with_capacity(extended_domain.size());
 
     for point in extended_domain.elements() {
-        let shifted_point = point * omega; // 下一行点 差点被误导了
+        let shifted_point = point * omega;
         // 这个地方其实可以优化一下，用FFT计算，多项式多了会快很多，但为了清晰起见，这里直接逐点评估了。
         let a = polynomials
             .witness_polynomials
@@ -828,39 +804,30 @@ fn compute_boundary_term_evaluations_on_extended_domain(
     polynomials: &Step5_1Polynomials,
     original_domain: &PlonkDomain,
     extended_domain: &PlonkDomain,
-) -> (Vec<Fr>, Vec<Fr>) {
-    // Paper mapping: L_0(X) and L_{n-1}(X) gate the two permutation boundary checks inside the numerator.
-    let omega = original_domain.group_gen();
+) -> Vec<Fr> {
+    // Paper mapping: L_0(X) gates the permutation boundary check inside the numerator.
+    let _omega = original_domain.group_gen();
     let one = Fr::from(1u64); // 黄金标准：边界值必须是 1
     let mut boundary_term_1_evaluations = Vec::with_capacity(extended_domain.size());
-    let mut boundary_term_2_evaluations = Vec::with_capacity(extended_domain.size());
 
     for point in extended_domain.elements() {
-        let shifted_point = point * omega; // 下一行
-        let z_at_x = polynomials.z_polynomial.evaluate(&point); //z(x)
-        let z_at_shifted_x = polynomials.z_polynomial.evaluate(&shifted_point); //z(omega*x)
+        let z_at_x = polynomials.z_polynomial.evaluate(&point); // z(x)
         let l_0_at_x = polynomials.l_0_polynomial.evaluate(&point); // l_0(x)
-        let l_n_minus_1_at_x = polynomials.l_n_minus_1_polynomial.evaluate(&point); // l_{n-1}(x)
-
-        //( Z(X) - 1 ) * L_0(X)
         boundary_term_1_evaluations.push((z_at_x - one) * l_0_at_x);
-        //约束项 2：( Z(ωX) - 1 ) * L_{n-1}(X)
-        boundary_term_2_evaluations.push((z_at_shifted_x - one) * l_n_minus_1_at_x);
     }
-    (boundary_term_1_evaluations, boundary_term_2_evaluations)
+    boundary_term_1_evaluations
 }
 
 /// 功能说明：按固定顺序聚合各类约束 evaluations。
 /// 输入：四类约束 evaluations 与 `alpha`。
 /// 输出：聚合后的 numerator evaluations。
-/// 示例：顺序固定为 gate + alpha*perm + alpha^2*boundary1 + alpha^3*boundary2。
+/// 示例：顺序固定为 gate + alpha*perm + alpha^2*boundary1。
 /// 在domian上计算，只是确实了vanish多项式
 fn aggregate_numerator_evaluations(
     gate_term_evaluations: &[Fr],
     public_input_term_evaluations: &[Fr],
     permutation_term_evaluations: &[Fr],
     boundary_term_1_evaluations: &[Fr],
-    boundary_term_2_evaluations: &[Fr],
     alpha: Fr,
 ) -> Result<Vec<Fr>> {
     // Paper mapping: quotient aggregation term combining gate, permutation, and boundary relations.
@@ -869,21 +836,18 @@ fn aggregate_numerator_evaluations(
     ensure(
         public_input_term_evaluations.len() == length
             && permutation_term_evaluations.len() == length
-            && boundary_term_1_evaluations.len() == length
-            && boundary_term_2_evaluations.len() == length,
+            && boundary_term_1_evaluations.len() == length,
         "all term evaluations must have the same length",
     )?;
 
     let alpha_square = alpha * alpha;
-    let alpha_cube = alpha_square * alpha;
     let mut numerator_evaluations = Vec::with_capacity(length);
     for row_index in 0..length {
         numerator_evaluations.push(
             gate_term_evaluations[row_index]
                 + public_input_term_evaluations[row_index]
                 + alpha * permutation_term_evaluations[row_index]
-                + alpha_square * boundary_term_1_evaluations[row_index]
-                + alpha_cube * boundary_term_2_evaluations[row_index],
+                + alpha_square * boundary_term_1_evaluations[row_index],
         );
     }
 

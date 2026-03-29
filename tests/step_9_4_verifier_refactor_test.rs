@@ -234,7 +234,7 @@ fn verifier_rejects_tampered_evaluations() {
     );
 
     let mut proof = fixture.proof.clone();
-    proof.shifted_evaluations.grand_product_next += Fr::from(1u64);
+    proof.grand_product_at_zeta_omega += Fr::from(1u64);
     assert!(
         !verify(
             &proof,

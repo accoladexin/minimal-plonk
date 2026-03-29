@@ -13,7 +13,7 @@ use crate::{
     curve::Fr,
     types::{
         Commitment, EvaluationsAtZeta, OpeningCommitments, PlonkProof, QuotientChunkCommitments,
-        ShiftedEvaluations, TranscriptHash, TranscriptPreprocessedInput,
+        TranscriptHash, TranscriptPreprocessedInput,
     },
 };
 
@@ -178,14 +178,14 @@ impl Transcript {
     pub fn absorb_phase_9_evaluations(
         &mut self,
         evaluations_at_zeta: &EvaluationsAtZeta,
-        shifted_evaluations: &ShiftedEvaluations,
+        grand_product_at_zeta_omega: &Fr,
     ) {
         self.append_scalar(A_EVAL_AT_ZETA_LABEL, &evaluations_at_zeta.wire_a);
         self.append_scalar(B_EVAL_AT_ZETA_LABEL, &evaluations_at_zeta.wire_b);
         self.append_scalar(C_EVAL_AT_ZETA_LABEL, &evaluations_at_zeta.wire_c);
         self.append_scalar(S_SIGMA1_EVAL_AT_ZETA_LABEL, &evaluations_at_zeta.sigma_1);
         self.append_scalar(S_SIGMA2_EVAL_AT_ZETA_LABEL, &evaluations_at_zeta.sigma_2);
-        self.append_scalar(Z_SHIFTED_EVAL_LABEL, &shifted_evaluations.grand_product_next);
+        self.append_scalar(Z_SHIFTED_EVAL_LABEL, grand_product_at_zeta_omega);
     }
 
     /// Absorb the Phase 9 opening commitments `[W_z]` and `[W_{z omega}]`.
@@ -213,7 +213,10 @@ impl Transcript {
         self.absorb_phase_9_quotient_chunk_commitments(&proof.quotient_chunk_commitments);
         let zeta = self.challenge_scalar(ZETA_CHALLENGE_LABEL);
 
-        self.absorb_phase_9_evaluations(&proof.evaluations_at_zeta, &proof.shifted_evaluations);
+        self.absorb_phase_9_evaluations(
+            &proof.evaluations_at_zeta,
+            &proof.grand_product_at_zeta_omega,
+        );
         let v = self.challenge_scalar(V_CHALLENGE_LABEL);
 
         self.absorb_phase_9_opening_commitments(&proof.opening_commitments);

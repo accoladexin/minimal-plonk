@@ -51,17 +51,6 @@ impl EvaluationsAtZeta {
         }
     }
 }
-/// Claimed evaluations at shifted points needed by Phase 9.
-#[derive(Clone, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
-pub struct ShiftedEvaluations {
-    pub grand_product_next: Fr,
-}
-impl ShiftedEvaluations {
-    /// Build the shifted evaluation payload needed by the current proof.
-    pub fn new(grand_product_next: Fr) -> Self {
-        Self { grand_product_next }
-    }
-}
 /// Phase 9 quotient commitments [T_lo, T_mid, T_hi].
 #[derive(Clone, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct QuotientChunkCommitments {
@@ -101,8 +90,8 @@ pub struct PlonkProof {
     pub opening_commitments: OpeningCommitments,
     // 第一组多项式的打开点
     pub evaluations_at_zeta: EvaluationsAtZeta,
-    // 第二组的多项式的打开点，只有一个值
-    pub shifted_evaluations: ShiftedEvaluations,
+    // 论文语义中的 Z(omega * zeta) 打开值
+    pub grand_product_at_zeta_omega: Fr,
 }
 impl PlonkProof {
     /// Build the Phase 9 proof produced by the Step 9.3 prover.
@@ -112,7 +101,7 @@ impl PlonkProof {
         quotient_chunk_commitments: QuotientChunkCommitments,
         opening_commitments: OpeningCommitments,
         evaluations_at_zeta: EvaluationsAtZeta,
-        shifted_evaluations: ShiftedEvaluations,
+        grand_product_at_zeta_omega: Fr,
     ) -> Self {
         Self {
             wire_commitments,
@@ -120,7 +109,7 @@ impl PlonkProof {
             quotient_chunk_commitments,
             opening_commitments,
             evaluations_at_zeta,
-            shifted_evaluations,
+            grand_product_at_zeta_omega,
         }
     }
 }

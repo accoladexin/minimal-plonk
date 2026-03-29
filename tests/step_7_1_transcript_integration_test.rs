@@ -7,8 +7,7 @@ use minimal_plonk::{
     transcript::{Phase9TranscriptChallenges, Transcript},
     types::{
         Commitment, DomainParams, EvaluationsAtZeta, OpeningCommitments, PlonkProof,
-        QuotientChunkCommitments, ShiftedEvaluations, TranscriptPreprocessedInput,
-        VerifierProtocolParams,
+        QuotientChunkCommitments, TranscriptPreprocessedInput, VerifierProtocolParams,
     },
 };
 
@@ -61,7 +60,7 @@ fn sample_proof() -> PlonkProof {
             Fr::from(29u64),
             Fr::from(31u64),
         ),
-        ShiftedEvaluations::new(Fr::from(37u64)),
+        Fr::from(37u64),
     )
 }
 
@@ -94,7 +93,10 @@ fn replay_as_prover(
     transcript.absorb_phase_9_quotient_chunk_commitments(&proof.quotient_chunk_commitments);
     let zeta = transcript.challenge_scalar(b"zeta");
 
-    transcript.absorb_phase_9_evaluations(&proof.evaluations_at_zeta, &proof.shifted_evaluations);
+    transcript.absorb_phase_9_evaluations(
+        &proof.evaluations_at_zeta,
+        &proof.grand_product_at_zeta_omega,
+    );
     let v = transcript.challenge_scalar(b"v");
 
     transcript.absorb_phase_9_opening_commitments(&proof.opening_commitments);
@@ -136,7 +138,7 @@ fn replay_with_wrong_evaluation_order(
     transcript.append_scalar(b"s_sigma2_eval_at_zeta", &proof.evaluations_at_zeta.sigma_2);
     transcript.append_scalar(
         b"grand_product_eval_at_shifted_zeta",
-        &proof.shifted_evaluations.grand_product_next,
+        &proof.grand_product_at_zeta_omega,
     );
 
     transcript.challenge_scalar(b"v")
