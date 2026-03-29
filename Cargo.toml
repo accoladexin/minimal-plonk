@@ -41,3 +41,7 @@ harness = false
 [[bench]]
 name = "macro_plonk"
 harness = false
+
+[[bench]]
+name = "macro_plonk_baseline"
+harness = false

@@ -1,6 +1,4 @@
-//! Minimal-Plonk：最小但完整的 Plonk 证明系统（Rust + arkworks）
-//!
-//! 当前处于 Phase 0：工程骨架阶段。
+//! Minimal Plonk: a small but complete Plonk proof system built with Rust and arkworks.
 
 pub mod cs;
 pub mod curve;

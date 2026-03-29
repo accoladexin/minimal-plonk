@@ -12,7 +12,7 @@ use minimal_plonk::{
     types::{
         SelectorPolynomials, SigmaTagPolynomials, VerifierPreprocessedInput, VerifierProtocolParams,
     },
-    verifier::verify,
+    verifier::{prepare_verifier_input, verify, verify_with_prepared_input},
     witness::interpolate_column_evaluations,
 };
 
@@ -191,6 +191,30 @@ fn verifier_accepts_valid_phase_9_proof_with_copy_constraints() {
         )
         .unwrap()
     );
+}
+
+#[test]
+fn prepared_verifier_input_matches_verify_wrapper() {
+    let fixture = sample_fixture();
+    let prepared_input = prepare_verifier_input(&fixture.verifier_input, &fixture.srs).unwrap();
+
+    let wrapper_result = verify(
+        &fixture.proof,
+        fixture.public_inputs.as_slice(),
+        &fixture.verifier_input,
+        &fixture.srs,
+    )
+    .unwrap();
+    let prepared_result = verify_with_prepared_input(
+        &fixture.proof,
+        fixture.public_inputs.as_slice(),
+        &fixture.verifier_input,
+        &prepared_input,
+        &fixture.srs,
+    )
+    .unwrap();
+
+    assert_eq!(wrapper_result, prepared_result);
 }
 
 #[test]
